@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">SJTU Hive</string>
+    <!-- 玻璃底栏「恢复导航」按钮的无障碍文案，与 legado-with-MD3 同名资源 -->
+    <string name="home_capsule_restore_navigation">恢复导航栏</string>
+</resources>

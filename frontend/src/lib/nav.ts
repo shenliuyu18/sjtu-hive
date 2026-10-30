@@ -1,0 +1,70 @@
+import type { LucideIcon } from 'lucide-react';
+import {
+  Bell,
+  CalendarDays,
+  Cloud,
+  FolderOpen,
+  LayoutDashboard,
+  ListTodo,
+  Mail,
+  MessagesSquare,
+  MonitorPlay,
+  PanelsTopLeft,
+  Settings,
+} from 'lucide-react';
+import type { AppView } from './types';
+
+export interface NavItem {
+  id: AppView;
+  label: string;
+  short: string;
+  icon: LucideIcon;
+}
+
+export interface NavGroup {
+  label: string;
+  items: NavItem[];
+}
+
+export const navGroups: NavGroup[] = [
+  {
+    label: '概览',
+    items: [{ id: 'dashboard', label: '概览', short: '概览', icon: LayoutDashboard }],
+  },
+  {
+    label: '消息',
+    items: [{ id: 'notifications', label: '通知', short: '通知', icon: Bell }],
+  },
+  {
+    label: '校园',
+    items: [
+      { id: 'canvas', label: '资料', short: '资料', icon: FolderOpen },
+      { id: 'mail', label: '邮箱', short: '邮箱', icon: Mail },
+      { id: 'timetable', label: '日程', short: '日程', icon: CalendarDays },
+      { id: 'classroom', label: '课堂视频', short: '视频', icon: MonitorPlay },
+      { id: 'shuiyuan', label: '水源', short: '水源', icon: MessagesSquare },
+      { id: 'cloudpan', label: '云盘', short: '云盘', icon: Cloud },
+    ],
+  },
+  {
+    label: '学习',
+    items: [
+      { id: 'todo', label: 'TODO', short: 'TODO', icon: ListTodo },
+      { id: 'workspace', label: '工作台', short: '工作台', icon: PanelsTopLeft },
+    ],
+  },
+];
+
+export const settingsNav: NavItem = {
+  id: 'settings',
+  label: '设置',
+  short: '设置',
+  icon: Settings,
+};
+
+export const allNavItems = [...navGroups.flatMap((group) => group.items), settingsNav];
+
+export function viewLabel(view: AppView) {
+  if (view === 'notifications') return '通知';
+  return allNavItems.find((item) => item.id === view)?.label ?? 'SJTU Hive';
+}

@@ -1,0 +1,16 @@
+build/bin
+build/windows/installer/*
+!build/windows/installer/project.nsi
+!build/windows/installer/wails_tools.nsh
+node_modules
+frontend/dist
+frontend/wailsjs
+frontend/.vite
+.tools
+*.log
+.DS_Store
+Thumbs.db
+
+frontend/package.json.md5
+
+tmp/
