@@ -75,6 +75,17 @@ go test ./... -count=1
 
 架构说明见 [docs/design.md](docs/design.md)。
 
+## Android
+
+`android/` 是配套的 Android 应用（Kotlin + Jetpack Compose，minSdk 33），提供概览、日程、消息、云盘、课堂视频（自动横屏、玻璃控件、单/双画面）、水源与设置。
+
+```sh
+cd android
+gradle :app:assembleDebug   # 或 :app:assembleRelease（需本地 keystore.properties）
+```
+
+Release 中的 APK 为维护者本地正式签名；`android/keystore.properties` 与 `android/keystore/` 不入库。
+
 ## 已知限制
 
 - 交我办消息与云盘依赖 jAccount 会话：会话过期时应用会先静默续期，jAccount 本身过期后才需要重新登录；云盘 `user_token` 有效期 30 天，`access_token` 30 分钟自动续取。
