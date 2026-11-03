@@ -257,6 +257,8 @@ private fun HiveShell() {
                             loggedIn = HiveSession.isLoggedIn(context)
                             sessionVersion++
                             loginTarget = null
+                            // 首次登录完成后把各站点会话一次备好，避免刚进页面就报失效。
+                            sessionScope.launch { CampusSession.refreshAll(context, force = true) }
                         },
                     ) { Text("完成登录") }
                     Button(onClick = { loginTarget = null }) { Text("取消") }

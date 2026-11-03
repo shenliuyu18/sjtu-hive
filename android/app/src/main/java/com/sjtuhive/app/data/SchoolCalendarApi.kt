@@ -35,6 +35,17 @@ class CampusAuthException(message: String) : Exception(message)
 class SchoolCalendarApi(private val context: Context) {
 
     suspend fun events(start: LocalDateTime, end: LocalDateTime): List<SchoolEvent> = withContext(Dispatchers.IO) {
+        try {
+            loadEvents(start, end)
+        } catch (error: Exception) {
+            // 首次登录或日程会话过期时，OkHttp 的 SSO 链路未必能拿到日历会话，
+            // 先用隐藏 WebView 静默登录一次日历站，再重试。
+            CampusSession.refresh(context, "calendar.sjtu.edu.cn")
+            loadEvents(start, end)
+        }
+    }
+
+    private suspend fun loadEvents(start: LocalDateTime, end: LocalDateTime): List<SchoolEvent> {
         ensureSession()
         val calendars = loadCalendars()
         val query = "startDate=${encode(start.format(DATE_TIME))}" +
@@ -52,7 +63,7 @@ class SchoolCalendarApi(private val context: Context) {
                 array.optJSONObject(index)?.let(rawEvents::add)
             }
         }
-        rawEvents.mapNotNull { mapEvent(it, calendars) }
+        return rawEvents.mapNotNull { mapEvent(it, calendars) }
             .distinctBy { it.id }
             .sortedBy { it.startAt }
     }

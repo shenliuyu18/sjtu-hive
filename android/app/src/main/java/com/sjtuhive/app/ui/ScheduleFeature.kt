@@ -87,7 +87,7 @@ fun ScheduleScreen(
         var eventsResult = runCatching { loadEvents() }
         if (eventsResult.isFailure) {
             // 日历会话过期时先静默续期再重试一次。
-            CampusSession.refresh(context, "my.sjtu.edu.cn")
+            CampusSession.refresh(context, "calendar.sjtu.edu.cn")
             eventsResult = runCatching { loadEvents() }
         }
         eventsResult.onSuccess { events = it }
