@@ -555,6 +555,232 @@ func (p *CloudPan) Download(ctx context.Context, filePath, spaceID, target strin
 	return fmt.Sprint(written), nil
 }
 
+// Upload streams a local file into the given cloud folder.
+// coFile 上传分三步：申请上传槽（PUT 空 body）→ 直传对象存储 → confirm 落库。
+func (p *CloudPan) Upload(ctx context.Context, localPath, dir, spaceID string) (CloudPanFile, error) {
+	token, err := p.accessToken(ctx, spaceID)
+	if err != nil {
+		return CloudPanFile{}, err
+	}
+	info, err := os.Stat(localPath)
+	if err != nil {
+		return CloudPanFile{}, fmt.Errorf("无法读取本地文件：%w", err)
+	}
+	if info.IsDir() {
+		return CloudPanFile{}, errors.New("暂不支持上传文件夹")
+	}
+	file, err := os.Open(localPath)
+	if err != nil {
+		return CloudPanFile{}, fmt.Errorf("无法打开本地文件：%w", err)
+	}
+	defer file.Close()
+
+	p.mu.Lock()
+	userID := p.session.UserID
+	p.mu.Unlock()
+
+	clean := strings.Trim(dir, "/")
+	name := filepath.Base(localPath)
+	targetPath := name
+	if clean != "" {
+		targetPath = clean + "/" + name
+	}
+	userIDText := strconv.Itoa(userID)
+
+	// 1. 申请上传槽：服务端返回对象存储地址、预签名头与 confirmKey。
+	slotValues := url.Values{}
+	slotValues.Set("access_token", token.Token)
+	slotValues.Set("user_id", userIDText)
+	slotValues.Set("conflict_resolution_strategy", "rename")
+	slotValues.Set("filesize", strconv.FormatInt(info.Size(), 10))
+	slotEndpoint := fmt.Sprintf("%s/api/v1/file/%s/%s/%s?%s", cloudPanOrigin,
+		url.PathEscape(token.LibraryID), url.PathEscape(token.SpaceID),
+		escapePanPath(targetPath), slotValues.Encode())
+	slotRequest, err := http.NewRequestWithContext(ctx, http.MethodPut, slotEndpoint, nil)
+	if err != nil {
+		return CloudPanFile{}, err
+	}
+	slotRequest.Header.Set("User-Agent", portalUserAgent)
+	slotRequest.Header.Set("Accept", "application/json, text/plain, */*")
+	slotRequest.Header.Set("Origin", cloudPanOrigin)
+	slotRequest.Header.Set("Referer", cloudPanOrigin+"/")
+	slotResponse, err := p.client.Do(slotRequest)
+	if err != nil {
+		return CloudPanFile{}, errors.New("上传失败：无法连接交大云盘")
+	}
+	slotData, _ := io.ReadAll(io.LimitReader(slotResponse.Body, 1<<20))
+	slotResponse.Body.Close()
+	if slotResponse.StatusCode == http.StatusUnauthorized || slotResponse.StatusCode == http.StatusForbidden {
+		return CloudPanFile{}, ErrCloudPanAuth
+	}
+	if slotResponse.StatusCode >= 400 {
+		return CloudPanFile{}, cloudPanUploadError(slotResponse.StatusCode, slotData)
+	}
+	var slot struct {
+		Domain     string            `json:"domain"`
+		Path       string            `json:"path"`
+		Headers    map[string]string `json:"headers"`
+		ConfirmKey string            `json:"confirmKey"`
+	}
+	if err := json.Unmarshal(slotData, &slot); err != nil || slot.Domain == "" || slot.Path == "" || slot.ConfirmKey == "" {
+		return CloudPanFile{}, errors.New("交大云盘没有返回可用的上传地址")
+	}
+	cosURL := "https://" + slot.Domain + slot.Path
+	if err := validateCloudPanMediaURL(cosURL); err != nil {
+		return CloudPanFile{}, errors.New("交大云盘返回的上传地址不受信任")
+	}
+
+	// 2. 直传对象存储。
+	progress := &cloudPanProgressReader{
+		reader: file,
+		total:  info.Size(),
+		report: func(sent, total int64) {
+			p.emit("cloudPan.upload.progress", map[string]any{
+				"name": name, "sent": sent, "total": total,
+			})
+		},
+	}
+	progress.report(0, info.Size())
+	putRequest, err := http.NewRequestWithContext(ctx, http.MethodPut, cosURL, progress)
+	if err != nil {
+		return CloudPanFile{}, err
+	}
+	for key, value := range slot.Headers {
+		putRequest.Header.Set(key, value)
+	}
+	putRequest.ContentLength = info.Size()
+	uploadClient := &http.Client{Timeout: 0}
+	putResponse, err := uploadClient.Do(putRequest)
+	if err != nil {
+		if ctx.Err() != nil {
+			return CloudPanFile{}, ctx.Err()
+		}
+		return CloudPanFile{}, errors.New("上传失败：对象存储连接中断")
+	}
+	_, _ = io.Copy(io.Discard, io.LimitReader(putResponse.Body, 1<<20))
+	putResponse.Body.Close()
+	if putResponse.StatusCode >= 300 {
+		return CloudPanFile{}, fmt.Errorf("上传失败：对象存储返回 HTTP %d", putResponse.StatusCode)
+	}
+
+	// 3. confirm 让文件出现在目录里。
+	confirmValues := url.Values{}
+	confirmValues.Set("access_token", token.Token)
+	confirmValues.Set("user_id", userIDText)
+	confirmValues.Set("conflict_resolution_strategy", "rename")
+	confirmEndpoint := fmt.Sprintf("%s/api/v1/file/%s/%s/%s?confirm&%s", cloudPanOrigin,
+		url.PathEscape(token.LibraryID), url.PathEscape(token.SpaceID),
+		url.PathEscape(slot.ConfirmKey), confirmValues.Encode())
+	confirmRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, confirmEndpoint, strings.NewReader("{}"))
+	if err != nil {
+		return CloudPanFile{}, err
+	}
+	confirmRequest.Header.Set("User-Agent", portalUserAgent)
+	confirmRequest.Header.Set("Accept", "application/json, text/plain, */*")
+	confirmRequest.Header.Set("Content-Type", "application/json")
+	confirmRequest.Header.Set("Origin", cloudPanOrigin)
+	confirmRequest.Header.Set("Referer", cloudPanOrigin+"/")
+	confirmResponse, err := p.client.Do(confirmRequest)
+	if err != nil {
+		return CloudPanFile{}, errors.New("上传已发送，但确认落库失败，请刷新后查看")
+	}
+	confirmData, _ := io.ReadAll(io.LimitReader(confirmResponse.Body, 1<<20))
+	confirmResponse.Body.Close()
+	if confirmResponse.StatusCode >= 400 {
+		return CloudPanFile{}, cloudPanUploadError(confirmResponse.StatusCode, confirmData)
+	}
+
+	finalName := name
+	var payload struct {
+		Name             string   `json:"name"`
+		Size             panInt64 `json:"size"`
+		ContentType      string   `json:"contentType"`
+		ModificationTime string   `json:"modificationTime"`
+	}
+	if err := json.Unmarshal(confirmData, &payload); err == nil && strings.TrimSpace(payload.Name) != "" {
+		finalName = strings.TrimSpace(payload.Name)
+	}
+	finalPath := finalName
+	if clean != "" {
+		finalPath = clean + "/" + finalName
+	}
+	size := int64(payload.Size)
+	if size <= 0 {
+		size = info.Size()
+	}
+	p.emit("cloudPan.upload.progress", map[string]any{
+		"name": finalName, "sent": size, "total": size, "done": true,
+	})
+	_ = p.refreshQuota(ctx)
+	return CloudPanFile{
+		Name:        finalName,
+		Path:        finalPath,
+		Size:        size,
+		ContentType: payload.ContentType,
+		ModifiedAt:  payload.ModificationTime,
+		CanPreview:  true,
+		CanDownload: true,
+	}, nil
+}
+
+func cloudPanUploadError(status int, data []byte) error {
+	var failure struct {
+		Code    string `json:"code"`
+		Message string `json:"message"`
+	}
+	_ = json.Unmarshal(data, &failure)
+	if failure.Message != "" {
+		return fmt.Errorf("上传失败（%d）：%s", status, failure.Message)
+	}
+	return fmt.Errorf("上传失败：HTTP %d", status)
+}
+
+func (p *CloudPan) refreshQuota(ctx context.Context) error {
+	p.mu.Lock()
+	session := p.session
+	p.mu.Unlock()
+	if session.UserToken == "" {
+		return nil
+	}
+	values := url.Values{}
+	values.Set("user_token", session.UserToken)
+	values.Set("device_id", p.deviceID())
+	var quota struct {
+		Capacity string `json:"capacity"`
+		Size     string `json:"size"`
+	}
+	if err := p.do(ctx, http.MethodGet, cloudPanOrigin+"/user/v1/space/1?"+values.Encode(), "", nil, &quota); err != nil {
+		return err
+	}
+	p.setState(func(state *CloudPanState) {
+		state.UsedBytes = parseByteSize(quota.Size)
+		state.TotalBytes = parseByteSize(quota.Capacity)
+		state.LastSyncedAt = Now()
+	})
+	return nil
+}
+
+type cloudPanProgressReader struct {
+	reader io.Reader
+	total  int64
+	sent   int64
+	last   time.Time
+	report func(sent, total int64)
+}
+
+func (r *cloudPanProgressReader) Read(buffer []byte) (int, error) {
+	n, err := r.reader.Read(buffer)
+	if n > 0 {
+		r.sent += int64(n)
+		now := time.Now()
+		if now.Sub(r.last) > 200*time.Millisecond || err == io.EOF {
+			r.last = now
+			r.report(r.sent, r.total)
+		}
+	}
+	return n, err
+}
+
 func (p *CloudPan) Logout() (CloudPanState, error) {
 	p.mu.Lock()
 	session := p.session
@@ -618,6 +844,17 @@ func (p *CloudPan) Register(router *Router) {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 		defer cancel()
 		return p.Download(ctx, filePath, spaceID, target)
+	})
+	router.Handle("cloudPan.upload", func(args []json.RawMessage) (any, error) {
+		localPath, err := DecodeArg[string](args, 0)
+		if err != nil {
+			return nil, err
+		}
+		dir, _, _ := DecodeOptionalArg[string](args, 1)
+		spaceID, _, _ := DecodeOptionalArg[string](args, 2)
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Minute)
+		defer cancel()
+		return p.Upload(ctx, localPath, dir, spaceID)
 	})
 	router.Handle("cloudPan.logout", func([]json.RawMessage) (any, error) {
 		return p.Logout()
@@ -714,3 +951,4 @@ func maxInt64(value, minimum int64) int64 {
 	}
 	return value
 }
+

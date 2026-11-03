@@ -8,10 +8,11 @@ import {
   LogIn,
   LogOut,
   RefreshCw,
+  Upload,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
-import { call } from '@/lib/bridge';
+import { call, on } from '@/lib/bridge';
 import type { CloudPanFile, CloudPanList, CloudPanState, DocumentContent } from '@/lib/models';
 import { formatBytes, formatDate } from '@/lib/format';
 import { cn } from '@/lib/cn';
@@ -35,6 +36,16 @@ export function CloudPanPage() {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState('');
+  const [uploading, setUploading] = useState('');
+  const [uploadProgress, setUploadProgress] = useState<{ sent: number; total: number } | null>(null);
+
+  useEffect(() => {
+    return on('cloudPan.upload.progress', (value) => {
+      const payload = value as { sent?: number; total?: number } | null;
+      if (!payload || typeof payload.sent !== 'number' || typeof payload.total !== 'number') return;
+      setUploadProgress({ sent: payload.sent, total: payload.total });
+    });
+  }, []);
 
   const breadcrumbs = useMemo(() => {
     if (!path) return [];
@@ -145,6 +156,30 @@ export function CloudPanPage() {
     }
   };
 
+  const upload = async () => {
+    let picked = '';
+    try {
+      picked = (await call<string>('app.chooseFiles', '选择要上传到云盘的文件')) ?? '';
+    } catch (cause) {
+      toast.error(cause instanceof Error ? cause.message : '无法打开文件选择器');
+      return;
+    }
+    if (!picked) return;
+    const name = picked.split(/[\\/]/).pop() ?? '文件';
+    setUploading(name);
+    setUploadProgress(null);
+    try {
+      await call<CloudPanFile>('cloudPan.upload', picked, path, '');
+      toast.success(`已上传 ${name}`);
+      await load(path);
+    } catch (cause) {
+      toast.error(cause instanceof Error ? cause.message : '上传失败');
+    } finally {
+      setUploading('');
+      setUploadProgress(null);
+    }
+  };
+
   const usage = state && state.totalBytes > 0
     ? `${formatBytes(state.usedBytes)} / ${formatBytes(state.totalBytes)}`
     : '';
@@ -159,6 +194,14 @@ export function CloudPanPage() {
           <>
             {state?.connected ? (
               <>
+                <Button variant="secondary" onClick={() => void upload()} disabled={Boolean(uploading)}>
+                  {uploading ? (
+                    <RefreshCw className="size-4 animate-spin" />
+                  ) : (
+                    <Upload className="size-4" />
+                  )}
+                  上传
+                </Button>
                 <Button variant="secondary" onClick={() => void load(path)} disabled={loading}>
                   <RefreshCw className={cn('size-4', loading && 'animate-spin')} /> 刷新
                 </Button>
@@ -174,6 +217,33 @@ export function CloudPanPage() {
           </>
         }
       />
+      {uploading ? (
+        <div className="mx-6 mb-3 rounded-lg border border-line bg-surface px-3 py-2 text-[0.68rem] text-ink-2">
+          <div className="flex items-center justify-between gap-3">
+            <span className="truncate">
+              正在上传 {uploading}
+              {uploadProgress ? ` · ${formatBytes(uploadProgress.sent)} / ${formatBytes(uploadProgress.total)}` : ''}
+            </span>
+            <span className="shrink-0">
+              {uploadProgress && uploadProgress.total > 0
+                ? `${Math.min(100, Math.round((uploadProgress.sent / uploadProgress.total) * 100))}%`
+                : '准备中'}
+            </span>
+          </div>
+          <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-line">
+            <div
+              className="h-full rounded-full bg-accent transition-[width]"
+              style={{
+                width: `${
+                  uploadProgress && uploadProgress.total > 0
+                    ? Math.min(100, Math.round((uploadProgress.sent / uploadProgress.total) * 100))
+                    : 3
+                }%`,
+              }}
+            />
+          </div>
+        </div>
+      ) : null}
       {state && !state.connected && state.error ? (
         <div className="mx-6 mb-3 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-[0.68rem] text-warning">
           {state.error}

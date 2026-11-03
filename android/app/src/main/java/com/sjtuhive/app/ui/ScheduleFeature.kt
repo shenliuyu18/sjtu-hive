@@ -43,6 +43,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.sjtuhive.app.data.CampusSession
 import com.sjtuhive.app.data.ExamApi
 import com.sjtuhive.app.data.ExamItem
 import com.sjtuhive.app.data.SchoolCalendarApi
@@ -77,15 +78,27 @@ fun ScheduleScreen(
         loading = true
         error = null
         examError = null
-        runCatching {
-            SchoolCalendarApi(context).events(
-                today.minusDays(7).atStartOfDay(),
-                today.plusDays(70).atStartOfDay(),
-            )
-        }.onSuccess { events = it }
+        suspend fun loadEvents() = SchoolCalendarApi(context).events(
+            today.minusDays(7).atStartOfDay(),
+            today.plusDays(70).atStartOfDay(),
+        )
+        suspend fun loadExams() = ExamApi(context).upcoming()
+
+        var eventsResult = runCatching { loadEvents() }
+        if (eventsResult.isFailure) {
+            // 日历会话过期时先静默续期再重试一次。
+            CampusSession.refresh(context, "my.sjtu.edu.cn")
+            eventsResult = runCatching { loadEvents() }
+        }
+        eventsResult.onSuccess { events = it }
             .onFailure { error = it.message ?: "读取失败" }
-        runCatching { ExamApi(context).upcoming() }
-            .onSuccess { exams = it }
+
+        var examResult = runCatching { loadExams() }
+        if (examResult.isFailure) {
+            CampusSession.refresh(context, "i.sjtu.edu.cn")
+            examResult = runCatching { loadExams() }
+        }
+        examResult.onSuccess { exams = it }
             .onFailure { examError = it.message ?: "考试信息读取失败" }
         loading = false
     }

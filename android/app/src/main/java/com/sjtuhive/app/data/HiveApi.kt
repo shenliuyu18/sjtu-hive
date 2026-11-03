@@ -84,20 +84,43 @@ object HiveSession {
         val current = store(context)
         var changed = false
         campusHosts.forEach { host ->
-            val header = runCatching { manager.getCookie("https://$host") }.getOrNull() ?: return@forEach
-            val cookies = parseCookieHeader(header)
-            if (cookies.isEmpty()) return@forEach
+            // getCookie 只返回匹配该 URL 路径的 Cookie；交大的会话经常挂在子路径下，
+            // 必须按常见路径逐个探测，否则会丢掉教室/教学网的 Path 级 Cookie。
             val bucket = current.getOrPut(host) { mutableMapOf() }
-            cookies.forEach { (name, value) ->
-                if (bucket[name] != value) {
-                    bucket[name] = value
-                    changed = true
+            cookieProbePaths(host).forEach { probePath ->
+                val header = runCatching { manager.getCookie("https://$host$probePath") }.getOrNull()
+                    ?: return@forEach
+                parseCookieHeader(header).forEach { (name, value) ->
+                    if (bucket[name] != value) {
+                        bucket[name] = value
+                        changed = true
+                    }
                 }
             }
         }
-        if (changed) saveStore(context, current)
+        if (changed) saveStore(context, current.filterValues { it.isNotEmpty() })
         // 让 WebView 的 cookie 立刻落盘，进程被杀后静默 SSO 还能接着用。
         runCatching { manager.flush() }
+    }
+
+    /**
+     * 进程重启后 WebView 可能已经丢掉会话 Cookie；把落盘的 Cookie 写回去，
+     * 隐藏 WebView 的静默 SSO 才能继续工作。
+     */
+    fun restoreToWebView(context: Context) {
+        val manager = runCatching { CookieManager.getInstance() }.getOrNull() ?: return
+        var written = 0
+        store(context).forEach { (host, cookies) ->
+            val url = "https://$host/"
+            val existing = runCatching { manager.getCookie(url) }.getOrNull().orEmpty()
+            cookies.forEach { (name, value) ->
+                if (name.isBlank() || value.isBlank()) return@forEach
+                if (existing.contains("$name=")) return@forEach
+                runCatching { manager.setCookie(url, "$name=$value; Path=/; Secure") }
+                written++
+            }
+        }
+        if (written > 0) runCatching { manager.flush() }
     }
 
     fun clear(context: Context) {
@@ -108,6 +131,14 @@ object HiveSession {
         val current = store(context)
         if (current.remove(host) != null) saveStore(context, current)
     }
+}
+
+private fun cookieProbePaths(host: String): List<String> = when (host) {
+    "v.sjtu.edu.cn" -> listOf("/", "/jy-application-resourcemanage/", "/jy-application-resourcemanage-ui/")
+    "i.sjtu.edu.cn" -> listOf("/", "/student/", "/xtgl/")
+    "my.sjtu.edu.cn" -> listOf("/", "/ui/", "/api/")
+    "calendar.sjtu.edu.cn", "pan.sjtu.edu.cn" -> listOf("/", "/api/")
+    else -> listOf("/")
 }
 
 internal fun parseCookieHeader(header: String?): Map<String, String> =

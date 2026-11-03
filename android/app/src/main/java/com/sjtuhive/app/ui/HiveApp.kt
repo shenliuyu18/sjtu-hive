@@ -30,6 +30,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -37,9 +38,11 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.alpha
@@ -49,10 +52,14 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import android.webkit.WebView
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import com.sjtuhive.app.data.CampusSession
 import com.sjtuhive.app.data.HiveSession
 import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import io.legado.app.domain.model.settings.AppUiConfiguration
 import io.legado.app.ui.theme.LocalAppUiConfiguration
 import io.legado.app.ui.theme.LocalIsDark
@@ -115,6 +122,30 @@ private fun HiveShell() {
     var selected by remember { mutableIntStateOf(0) }
     val context = LocalContext.current
     var loggedIn by remember { mutableStateOf(HiveSession.isLoggedIn(context)) }
+
+    // WebView 体系初始化完成前读不到 WebView 的 Cookie；回到前台时再用它校准登录态，
+    // 避免会话其实还在、界面却显示“未登录”。
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val sessionScope = rememberCoroutineScope()
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                HiveSession.refreshFromWebView(context)
+                loggedIn = HiveSession.isLoggedIn(context)
+                sessionScope.launch { CampusSession.refreshAll(context) }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    LaunchedEffect(Unit) {
+        delay(1500)
+        HiveSession.refreshFromWebView(context)
+        loggedIn = HiveSession.isLoggedIn(context)
+        // 启动时把所有主要在用的站点会话先续一遍，避免闲置过期后各模块各自报失效。
+        CampusSession.refreshAll(context)
+        loggedIn = HiveSession.isLoggedIn(context)
+    }
     var loginTarget by remember { mutableStateOf<LoginTarget?>(null) }
     var sessionVersion by remember { mutableIntStateOf(0) }
     var showShuiyuan by remember { mutableStateOf(false) }
