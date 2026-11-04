@@ -64,17 +64,25 @@ fun ScheduleScreen(
     onLoginTeachingSite: () -> Unit,
 ) {
     val today = remember { LocalDate.now() }
+    val cached = HiveUiCache.schedule
     var weekStart by remember { mutableStateOf(today.with(DayOfWeek.MONDAY)) }
     var selectedDay by remember { mutableStateOf(today) }
-    var events by remember { mutableStateOf<List<SchoolEvent>>(emptyList()) }
-    var exams by remember { mutableStateOf<List<ExamItem>>(emptyList()) }
-    var examError by remember { mutableStateOf<String?>(null) }
+    var events by remember { mutableStateOf(cached?.events ?: emptyList()) }
+    var exams by remember { mutableStateOf(cached?.exams ?: emptyList()) }
+    var examError by remember { mutableStateOf(cached?.examError) }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var reload by remember { mutableIntStateOf(0) }
 
     LaunchedEffect(loggedIn, reload) {
         if (!loggedIn) return@LaunchedEffect
+        val cache = HiveUiCache.schedule
+        if (reload == 0 && cache != null && HiveUiCache.fresh(cache.at)) {
+            events = cache.events
+            exams = cache.exams
+            examError = cache.examError
+            return@LaunchedEffect
+        }
         loading = true
         error = null
         examError = null
@@ -100,6 +108,14 @@ fun ScheduleScreen(
         }
         examResult.onSuccess { exams = it }
             .onFailure { examError = it.message ?: "考试信息读取失败" }
+        if (error == null) {
+            HiveUiCache.schedule = HiveUiCache.Schedule(
+                events = events,
+                exams = exams,
+                examError = examError,
+                at = System.currentTimeMillis(),
+            )
+        }
         loading = false
     }
 

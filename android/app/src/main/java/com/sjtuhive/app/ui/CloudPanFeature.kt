@@ -53,8 +53,9 @@ fun CloudPanScreen(
 ) {
     val api = remember { CloudPanApi(context) }
     val scope = rememberCoroutineScope()
-    var path by remember { mutableStateOf("") }
-    var files by remember { mutableStateOf<List<CloudFile>>(emptyList()) }
+    val cached = HiveUiCache.cloud
+    var path by remember { mutableStateOf(cached?.path ?: "") }
+    var files by remember { mutableStateOf(cached?.files ?: emptyList()) }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var reload by remember { mutableStateOf(0) }
@@ -63,10 +64,18 @@ fun CloudPanScreen(
 
     LaunchedEffect(loggedIn, path, reload) {
         if (!loggedIn) return@LaunchedEffect
+        val cache = HiveUiCache.cloud
+        if (reload == 0 && cache != null && cache.path == path && HiveUiCache.fresh(cache.at)) {
+            files = cache.files
+            return@LaunchedEffect
+        }
         loading = true
         error = null
         runCatching { api.listing(path) }
-            .onSuccess { files = it.files }
+            .onSuccess {
+                files = it.files
+                HiveUiCache.cloud = HiveUiCache.Cloud(path, it.files, System.currentTimeMillis())
+            }
             .onFailure { error = it.message ?: "云盘读取失败" }
         loading = false
     }

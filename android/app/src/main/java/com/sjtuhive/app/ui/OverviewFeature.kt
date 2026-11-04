@@ -50,15 +50,24 @@ fun OverviewScreen(
     onOpenClassroom: () -> Unit,
 ) {
     val today = remember { LocalDate.now() }
+    val cached = HiveUiCache.overview
     var loading by remember { mutableStateOf(false) }
-    var unread by remember { mutableStateOf(0) }
-    var recent by remember { mutableStateOf<List<PortalMessage>>(emptyList()) }
-    var todayEvents by remember { mutableStateOf<List<SchoolEvent>>(emptyList()) }
-    var nextExam by remember { mutableStateOf<ExamItem?>(null) }
+    var unread by remember { mutableStateOf(cached?.unread ?: 0) }
+    var recent by remember { mutableStateOf(cached?.recent ?: emptyList()) }
+    var todayEvents by remember { mutableStateOf(cached?.events ?: emptyList()) }
+    var nextExam by remember { mutableStateOf(cached?.nextExam) }
     var reload by remember { mutableIntStateOf(0) }
 
     LaunchedEffect(loggedIn, reload) {
         if (!loggedIn) return@LaunchedEffect
+        val cache = HiveUiCache.overview
+        if (reload == 0 && cache != null && HiveUiCache.fresh(cache.at)) {
+            unread = cache.unread
+            recent = cache.recent
+            todayEvents = cache.events
+            nextExam = cache.nextExam
+            return@LaunchedEffect
+        }
         loading = true
         runCatching {
             val api = HiveApi(context)
@@ -80,6 +89,13 @@ fun OverviewScreen(
                     exam.startAt == null || exam.startAt.isAfter(LocalDateTime.now())
                 }
             }
+        HiveUiCache.overview = HiveUiCache.Overview(
+            unread = unread,
+            recent = recent,
+            events = todayEvents,
+            nextExam = nextExam,
+            at = System.currentTimeMillis(),
+        )
         loading = false
     }
 

@@ -52,14 +52,21 @@ fun MessagesScreen(
     loggedIn: Boolean,
     onLogin: () -> Unit,
 ) {
+    val cached = HiveUiCache.messages
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
-    var messages by remember { mutableStateOf<List<PortalMessage>>(emptyList()) }
-    var unread by remember { mutableStateOf(0) }
+    var messages by remember { mutableStateOf(cached?.messages ?: emptyList()) }
+    var unread by remember { mutableStateOf(cached?.unread ?: 0) }
     var reload by remember { mutableStateOf(0) }
 
     LaunchedEffect(loggedIn, reload) {
         if (!loggedIn) return@LaunchedEffect
+        val cache = HiveUiCache.messages
+        if (reload == 0 && cache != null && HiveUiCache.fresh(cache.at)) {
+            messages = cache.messages
+            unread = cache.unread
+            return@LaunchedEffect
+        }
         loading = true
         error = null
         suspend fun fetch(): Triple<List<PortalMessage>, Int, List<PortalGroup>> {
@@ -79,8 +86,10 @@ fun MessagesScreen(
             fetch()
         }
         result.onSuccess { (fetched, total, _) ->
-            messages = fetched.distinctBy { it.id }.sortedByDescending { it.createdAt }
+            val list = fetched.distinctBy { it.id }.sortedByDescending { it.createdAt }
+            messages = list
             unread = total
+            HiveUiCache.messages = HiveUiCache.Messages(list, total, System.currentTimeMillis())
         }.onFailure { error = it.message ?: "读取失败" }
         loading = false
     }

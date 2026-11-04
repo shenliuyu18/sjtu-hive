@@ -39,6 +39,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.LocalContext
@@ -152,6 +153,11 @@ private fun HiveShell() {
     var showCanvas by remember { mutableStateOf(false) }
     var showEmail by remember { mutableStateOf(false) }
     var showClassroom by remember { mutableStateOf(false) }
+    val tabStates = rememberSaveableStateHolder()
+    // 登录态切换（登录完成/退出）时丢弃旧账号的页面缓存。
+    LaunchedEffect(sessionVersion) {
+        if (sessionVersion > 0) HiveUiCache.clear()
+    }
     // 玻璃底栏采样的是内容层的画面：这里把纯色背景画进 backdrop，
     // 底栏因此能对下方内容做真实模糊（kyant backdrop + 液态玻璃）。
     val background = MaterialTheme.colorScheme.background
@@ -185,6 +191,8 @@ private fun HiveShell() {
                 .fillMaxSize()
                 .layerBackdrop(backdrop),
         ) {
+            // 记住每个页签的滚动位置等可保存状态，切回来不会跳回顶部。
+            tabStates.SaveableStateProvider(selected) {
             key(sessionVersion) {
                 when (selected) {
                     0 -> OverviewScreen(
@@ -221,6 +229,7 @@ private fun HiveShell() {
                     )
                     else -> PlaceholderContent(tabs[selected])
                 }
+            }
             }
         }
         AndroidView(
