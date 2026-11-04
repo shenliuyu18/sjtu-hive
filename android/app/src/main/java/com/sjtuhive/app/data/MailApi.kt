@@ -132,8 +132,38 @@ class MailApi(private val context: Context) {
             }
         }
 
-    private fun collectAttachments(part: Part, result: MutableList<MailAttachment>) {
-        val name = runCatching { part.fileName }.getOrNull()
+    /** 把指定附件写入缓存，供内置预览打开。 */
+    suspend fun downloadAttachment(folderName: String, index: Int, fileName: String): java.io.File =
+        withContext(Dispatchers.IO) {
+            val account = account() ?: throw CampusAuthException("请先配置邮箱账号")
+            withFolder(account, folderName) { folder ->
+                val message = folder.getMessage(index) ?: error("邮件不存在")
+                val safe = fileName.replace(Regex("[\\\\/:*?\"<>|]"), "_").ifBlank { "attachment.bin" }
+                val target = java.io.File(java.io.File(context.cacheDir, "preview"), safe)
+                if (!writeAttachment(message, fileName, target)) error("附件读取失败")
+                target
+            }
+        }
+
+    private fun writeAttachment(part: Part, name: String, target: java.io.File): Boolean {
+        if (runCatching { part.fileName }.getOrNull() == name) {
+            val input = runCatching { part.inputStream }.getOrNull() ?: return false
+            target.parentFile?.mkdirs()
+            input.use { stream ->
+                target.outputStream().use { output -> stream.copyTo(output) }
+            }
+            return true
+        }
+        if (part.isMimeType("multipart/*")) {
+            val multipart = runCatching { part.content as? Multipart }.getOrNull() ?: return false
+            for (child in 0 until multipart.count) {
+                if (writeAttachment(multipart.getBodyPart(child), name, target)) return true
+            }
+        }
+        return false
+    }
+
+    private fun collectAttachments(part: Part, result: MutableList<MailAttachment>) {        val name = runCatching { part.fileName }.getOrNull()
         val disposition = runCatching { part.disposition }.getOrNull()
         if (!name.isNullOrBlank() && disposition.equals(Part.ATTACHMENT, ignoreCase = true)) {
             result += MailAttachment(name, runCatching { part.size.toLong() }.getOrDefault(0L))

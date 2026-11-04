@@ -214,30 +214,44 @@ fun CloudPanScreen(
             onDismissRequest = { if (!busy) selected = null },
             title = { Text(file.name) },
             text = {
-                Text(
-                    "选择用系统应用打开，或保存到本机下载目录。",
-                    style = MaterialTheme.typography.bodyMedium,
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        "可直接在应用内预览 PDF、图片、文本、音视频与 Office 文档；也可以交给系统应用或下载。",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    TextButton(
+                        enabled = !busy,
+                        onClick = {
+                            busy = true
+                            scope.launch {
+                                runCatching { api.fileUrl(file.path, download = false) }
+                                    .onSuccess { url ->
+                                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                        runCatching { context.startActivity(intent) }
+                                            .onFailure { toast(context, "没有可打开该文件的应用") }
+                                    }
+                                    .onFailure { toast(context, it.message ?: "打开失败") }
+                                busy = false
+                                selected = null
+                            }
+                        },
+                    ) { Text("用其他应用打开") }
+                }
             },
             confirmButton = {
                 TextButton(
                     enabled = !busy,
                     onClick = {
-                        busy = true
-                        scope.launch {
-                            runCatching { api.fileUrl(file.path, download = false) }
-                                .onSuccess { url ->
-                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
-                                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                    runCatching { context.startActivity(intent) }
-                                        .onFailure { toast(context, "没有可打开该文件的应用") }
-                                }
-                                .onFailure { toast(context, it.message ?: "打开失败") }
-                            busy = false
-                            selected = null
-                        }
+                        val target = file
+                        selected = null
+                        PreviewHost.open(
+                            PreviewRequest(title = target.name, fileName = target.name) {
+                                api.downloadToCache(target.path, target.name)
+                            },
+                        )
                     },
-                ) { Text("打开") }
+                ) { Text("预览") }
             },
             dismissButton = {
                 TextButton(

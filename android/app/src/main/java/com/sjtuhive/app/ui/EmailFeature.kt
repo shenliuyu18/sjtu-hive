@@ -44,6 +44,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.sjtuhive.app.data.MailAccount
 import com.sjtuhive.app.data.MailApi
+import com.sjtuhive.app.data.MailAttachment
 import com.sjtuhive.app.data.MailFolder
 import com.sjtuhive.app.data.MailSummary
 import kotlinx.coroutines.launch
@@ -334,7 +335,7 @@ private fun MailBody(
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
     var body by remember { mutableStateOf("") }
-    var attachments by remember { mutableStateOf<List<String>>(emptyList()) }
+    var attachments by remember { mutableStateOf<List<MailAttachment>>(emptyList()) }
 
     LaunchedEffect(index, folder) {
         loading = true
@@ -342,17 +343,7 @@ private fun MailBody(
             .onSuccess { body = it }
             .onFailure { error = it.message ?: "正文读取失败" }
         runCatching { api.attachments(folder, index) }
-            .onSuccess { list ->
-                attachments = list.map { attachment ->
-                    val size = when {
-                        attachment.size <= 0 -> ""
-                        attachment.size < 1024 -> "${attachment.size} B"
-                        attachment.size < 1024 * 1024 -> "%.0f KB".format(attachment.size / 1024.0)
-                        else -> "%.1f MB".format(attachment.size / 1024.0 / 1024.0)
-                    }
-                    attachment.name + if (size.isBlank()) "" else "（$size）"
-                }
-            }
+            .onSuccess { attachments = it }
         loading = false
     }
 
@@ -374,11 +365,39 @@ private fun MailBody(
             )
         }
         if (attachments.isNotEmpty()) {
-            Text(
-                "附件：${attachments.joinToString("、")}",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.primary,
-            )
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    "附件（点按预览）",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                attachments.forEach { attachment ->
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(MaterialTheme.colorScheme.surface)
+                            .clickable {
+                                PreviewHost.open(
+                                    PreviewRequest(
+                                        title = attachment.name,
+                                        fileName = attachment.name,
+                                    ) { api.downloadAttachment(folder, index, attachment.name) },
+                                )
+                            }
+                            .padding(horizontal = 12.dp, vertical = 9.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Text(attachment.name, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+                        Text(
+                            previewSizeLabel(attachment.size),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
         }
         when {
             loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -397,4 +416,11 @@ private fun MailBody(
             }
         }
     }
+}
+
+private fun previewSizeLabel(size: Long): String = when {
+    size <= 0 -> ""
+    size < 1024 -> "$size B"
+    size < 1024 * 1024 -> "%.0f KB".format(size / 1024.0)
+    else -> "%.1f MB".format(size / 1024.0 / 1024.0)
 }

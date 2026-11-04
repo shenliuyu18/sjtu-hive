@@ -274,7 +274,9 @@ private fun HiveShell() {
                 }
             }
         }
-        if (loginTarget == null && !showShuiyuan && !showCanvas && !showEmail && !showClassroom) FloatingBottomBar(
+        if (loginTarget == null && !showShuiyuan && !showCanvas && !showEmail && !showClassroom &&
+            PreviewHost.request == null
+        ) FloatingBottomBar(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
@@ -295,6 +297,9 @@ private fun HiveShell() {
                     Text(tab.label, style = MaterialTheme.typography.labelSmall)
                 }
             }
+        }
+        if (PreviewHost.request != null) {
+            FilePreviewOverlay()
         }
     }
 }

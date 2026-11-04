@@ -280,6 +280,39 @@ object HiveHttp {
             response.body?.string() ?: error("空响应")
         }
     }
+
+    /** 下载到本地文件（预签名地址不需要 Cookie，仍复用同一客户端）。 */
+    suspend fun download(
+        context: Context,
+        url: String,
+        target: java.io.File,
+        onProgress: (Long, Long) -> Unit = { _, _ -> },
+    ): java.io.File = withContext(Dispatchers.IO) {
+        val request = Request.Builder()
+            .url(url)
+            .header("User-Agent", USER_AGENT)
+            .build()
+        client(context).newCall(request).execute().use { response ->
+            if (!response.isSuccessful) error("下载失败：HTTP ${response.code}")
+            val body = response.body ?: error("下载内容为空")
+            val total = body.contentLength()
+            target.parentFile?.mkdirs()
+            body.byteStream().use { input ->
+                target.outputStream().use { output ->
+                    val buffer = ByteArray(64 * 1024)
+                    var written = 0L
+                    while (true) {
+                        val read = input.read(buffer)
+                        if (read <= 0) break
+                        output.write(buffer, 0, read)
+                        written += read
+                        onProgress(written, total)
+                    }
+                }
+            }
+        }
+        target
+    }
 }
 
 /** org.json 把 JSON null 读成字符串 "null"，这里统一成空串。 */

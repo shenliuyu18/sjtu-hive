@@ -80,8 +80,15 @@ class CloudPanApi(private val context: Context) {
         url
     }
 
-    fun accountName(): String = session?.displayName.orEmpty()
+    /** 下载到缓存目录，供内置预览使用。 */
+    suspend fun downloadToCache(path: String, name: String): java.io.File = withContext(Dispatchers.IO) {
+        val url = fileUrl(path, download = true)
+        val safe = name.replace(Regex("[\\\\/:*?\"<>|]"), "_").ifBlank { "preview.bin" }
+        val target = java.io.File(java.io.File(context.cacheDir, "preview"), safe)
+        HiveHttp.download(context, url, target)
+    }
 
+    fun accountName(): String = session?.displayName.orEmpty()
     fun reset() {
         session = null
         token = null
