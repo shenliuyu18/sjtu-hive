@@ -33,6 +33,7 @@ import { cn } from '@/lib/cn';
 import { useApp } from '@/stores/app';
 import { useSettings } from '@/stores/settings';
 import { Button } from '@/components/ui/Button';
+import { Dialog, DialogContent } from '@/components/ui/Dialog';
 import { Card, EmptyState, Skeleton } from '@/components/ui/Misc';
 import { useDashboard } from './dashboard-data';
 
@@ -669,7 +670,7 @@ function PortalMessageCard() {
   const [state, setState] = useState<PortalMessageState | null>(null);
   const [messages, setMessages] = useState<PortalMessage[]>([]);
   const [busy, setBusy] = useState(false);
-  const navigate = useApp((state2) => state2.navigate);
+  const [detail, setDetail] = useState<PortalMessage | null>(null);
 
   const apply = (list: PortalMessage[], next: PortalMessageState) => {
     setMessages(list.slice(0, 5));
@@ -733,11 +734,7 @@ function PortalMessageCard() {
             <button
               key={message.id}
               type="button"
-              onClick={() =>
-                message.url
-                  ? void call('app.openExternal', message.url)
-                  : navigate('notifications')
-              }
+              onClick={() => setDetail(message)}
               className="block w-full px-4 py-2.5 text-left transition-colors hover:bg-hover"
             >
               <div className="flex items-baseline gap-2">
@@ -757,6 +754,36 @@ function PortalMessageCard() {
           ))}
         </div>
       )}
+      <Dialog open={Boolean(detail)} onOpenChange={(open) => (open ? null : setDetail(null))}>
+        {detail ? (
+          <DialogContent
+            title={detail.title}
+            description={[detail.sourceName, detail.createdAt]
+              .filter(Boolean)
+              .join(' · ')}
+            footer={
+              <>
+                {detail.url ? (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => void call('app.openExternal', detail.url)}
+                  >
+                    打开链接
+                  </Button>
+                ) : null}
+                <Button size="sm" variant="ghost" onClick={() => setDetail(null)}>
+                  关闭
+                </Button>
+              </>
+            }
+          >
+            <div className="selectable whitespace-pre-wrap break-words text-sm leading-relaxed text-ink-2">
+              {detail.body || '（无正文）'}
+            </div>
+          </DialogContent>
+        ) : null}
+      </Dialog>
     </Card>
   );
 }
