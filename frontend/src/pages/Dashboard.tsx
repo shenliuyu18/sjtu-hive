@@ -236,6 +236,13 @@ export function Dashboard() {
   const appInfo = useSettings((state) => state.info);
   const mock = !hasBackend();
 
+  useEffect(() => {
+    const refresh = data.refresh;
+    const offMail = on('mail.state', () => refresh());
+    return () => offMail();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const lessons = useMemo(
     () => (data.lessons.length ? data.lessons : mock ? demoLessons() : []),
     [data.lessons, mock],
@@ -255,7 +262,10 @@ export function Dashboard() {
 
   const courses = data.canvas?.courses ?? [];
   const activeCourses = courses.filter((course) => !course.archived);
-  const unread = data.folders.reduce((sum, folder) => sum + (folder.unread ?? 0), 0) || (mock ? 3 : 0);
+  const inbox = data.folders.find(
+    (folder) => folder.specialUse === 'inbox' || folder.path.toUpperCase() === 'INBOX',
+  );
+  const unread = Math.max(0, inbox?.unread ?? 0) || (mock ? 3 : 0);
   const dueTodos = todos
     .filter((todo) => !todo.done && todo.dueAt)
     .sort((a, b) => (a.dueAt ?? '').localeCompare(b.dueAt ?? ''));
@@ -682,8 +692,12 @@ function PortalMessageCard() {
 
   useEffect(() => {
     load();
-    const off = on('portalMessage.changed', () => load());
-    return () => off();
+    const offPortal = on('portalMessage.changed', () => load());
+    const offNotifs = on('notifications.changed', () => load());
+    return () => {
+      offPortal();
+      offNotifs();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -700,9 +714,9 @@ function PortalMessageCard() {
       <div className="flex items-center gap-2 border-b border-line px-4 py-3">
         <Inbox className="size-4 text-accent" />
         <h2 className="text-sm font-semibold text-ink">交我办消息</h2>
-        {state?.unread ? (
+        {state?.unreadNotifications ? (
           <span className="rounded-full bg-danger/10 px-1.5 py-0.5 text-[0.6rem] font-medium text-danger">
-            {state.unread} 未读
+            {state.unreadNotifications} 未读
           </span>
         ) : null}
         <Button size="sm" variant="ghost" className="ml-auto" onClick={refresh} disabled={busy}>

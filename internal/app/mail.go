@@ -453,7 +453,7 @@ func (m *Mail) syncLocked() error {
 			processed++
 			continue
 		}
-		folderID, err := m.upsertFolder(info, mailbox)
+		folderID, err := m.upsertFolder(info, mailbox, m.countUnseen(mailbox))
 		if err != nil {
 			return err
 		}
@@ -506,17 +506,19 @@ func folderDisplayName(info *imap.MailboxInfo) string {
 	return name
 }
 
-func (m *Mail) upsertFolder(info *imap.MailboxInfo, mailbox *imap.MailboxStatus) (int64, error) {
+func (m *Mail) upsertFolder(info *imap.MailboxInfo, mailbox *imap.MailboxStatus, unread int) (int64, error) {
 	special := specialUse(info.Attributes)
 	total := int64(mailbox.Messages)
-	unread := int64(mailbox.Unseen)
+	if unread < 0 {
+		unread = 0
+	}
 	now := Now()
 	_, err := m.db.Exec(`INSERT INTO mail_folders (path, name, special_use, uid_validity, last_synced_at, total, unread)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(path) DO UPDATE SET name = excluded.name, special_use = excluded.special_use,
 		  uid_validity = excluded.uid_validity, last_synced_at = excluded.last_synced_at,
 		  total = excluded.total, unread = excluded.unread`,
-		info.Name, folderDisplayName(info), nullableText(special), int64(mailbox.UidValidity), now, total, unread)
+		info.Name, folderDisplayName(info), nullableText(special), int64(mailbox.UidValidity), now, total, int64(unread))
 	if err != nil {
 		return 0, err
 	}
@@ -525,6 +527,16 @@ func (m *Mail) upsertFolder(info *imap.MailboxInfo, mailbox *imap.MailboxStatus)
 		return 0, err
 	}
 	return id, nil
+}
+
+// countUnseen asks the server for exact UNSEEN uids; some IMAP servers omit
+// the UNSEEN value in their SELECT response, which leaves mailbox.Unseen at 0.
+func (m *Mail) countUnseen(mailbox *imap.MailboxStatus) int {
+	unseen := int(mailbox.Unseen)
+	if uids, err := m.client.UidSearch(&imap.SearchCriteria{WithoutFlags: []string{imap.SeenFlag}}); err == nil {
+		unseen = len(uids)
+	}
+	return unseen
 }
 
 func (m *Mail) syncFolderMessages(folderID int64, info *imap.MailboxInfo, mailbox *imap.MailboxStatus, processed *int) error {

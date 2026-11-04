@@ -40,6 +40,7 @@ type PortalMessageState struct {
 	Connected    bool   `json:"connected"`
 	Account      string `json:"account"`
 	Unread       int    `json:"unread"`
+	UnreadNotifs int    `json:"unreadNotifications"`
 	LastSyncedAt string `json:"lastSyncedAt"`
 	Error        string `json:"error"`
 }
@@ -116,6 +117,7 @@ func (p *PortalMessages) State() PortalMessageState {
 	state := PortalMessageState{
 		Connected:    p.campus.Connected(),
 		Unread:       p.unread,
+		UnreadNotifs: p.unreadNotifications(),
 		LastSyncedAt: p.lastSyncedAt,
 		Error:        p.lastError,
 	}
@@ -125,8 +127,16 @@ func (p *PortalMessages) State() PortalMessageState {
 	return state
 }
 
-func (p *PortalMessages) setError(message string) {
-	p.mu.Lock()
+// unreadNotifications keeps the overview badge in step with the notification
+// list: both count the same unread portal entries.
+func (p *PortalMessages) unreadNotifications() int {
+	var count int
+	_ = p.db.QueryRow(`SELECT COUNT(*) FROM notifications WHERE kind = 'portal' AND read_at IS NULL
+		AND (snoozed_until IS NULL OR snoozed_until <= ?)`, Now()).Scan(&count)
+	return count
+}
+
+func (p *PortalMessages) setError(message string) {	p.mu.Lock()
 	p.lastError = message
 	p.mu.Unlock()
 }

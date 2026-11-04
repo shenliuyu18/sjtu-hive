@@ -545,6 +545,7 @@ export interface PortalMessageState {
   connected: boolean;
   account: string;
   unread: number;
+  unreadNotifications: number;
   lastSyncedAt: string;
   error: string;
 }

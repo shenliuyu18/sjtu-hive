@@ -6,10 +6,12 @@ import {
   FolderOpen,
   Image as ImageIcon,
   Link2,
+  Maximize2,
+  Minimize2,
   Music,
   Video,
 } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import type { DocumentContent } from '@/lib/models';
 import { formatBytes, formatDate } from '@/lib/format';
 import { call } from '@/lib/bridge';
@@ -75,6 +77,16 @@ export function PreviewPane({
   actions?: ReactNode;
   emptyText?: string;
 }) {
+  const [fullscreen, setFullscreen] = useState(false);
+  useEffect(() => {
+    if (!fullscreen) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setFullscreen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [fullscreen]);
+
   if (loading) {
     return (
       <div className="flex h-full items-center justify-center gap-2 text-xs text-ink-3">
@@ -219,7 +231,12 @@ export function PreviewPane({
   const framed = ['html', 'pdf', 'docx', 'xlsx', 'video', 'audio'].includes(doc.format);
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-surface">
+    <div
+      className={cn(
+        'flex h-full min-h-0 flex-col bg-surface',
+        fullscreen && 'fixed inset-0 z-[60] h-auto shadow-[var(--shadow-pop)]',
+      )}
+    >
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-line px-4 py-3">
         <div className="min-w-0">
           <div className="truncate text-sm font-semibold text-ink" title={doc.title}>
@@ -232,7 +249,18 @@ export function PreviewPane({
             {doc.modifiedAt ? <span>· {formatDate(doc.modifiedAt, 'M月d日 HH:mm')}</span> : null}
           </div>
         </div>
-        <div className="flex shrink-0 items-center gap-1.5">{actions}</div>
+        <div className="flex shrink-0 items-center gap-1.5">
+          {actions}
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => setFullscreen((value) => !value)}
+            title={fullscreen ? '退出全屏（Esc）' : '全屏预览'}
+          >
+            {fullscreen ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
+            {fullscreen ? '退出全屏' : '全屏'}
+          </Button>
+        </div>
       </div>
       <MetaBar doc={doc} />
       <div className={cn('min-h-0 flex-1', !framed && 'overflow-hidden')}>{body()}</div>

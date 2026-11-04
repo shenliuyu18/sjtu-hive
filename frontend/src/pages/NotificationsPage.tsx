@@ -1,8 +1,10 @@
 import {
+  ArrowRight,
   Bell,
   CheckCheck,
   ChevronRight,
   ClipboardList,
+  ExternalLink,
   GraduationCap,
   Inbox,
   Mail,
@@ -14,11 +16,12 @@ import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { call, on } from '@/lib/bridge';
 import type { NotificationItem } from '@/lib/models';
-import { relativeTime } from '@/lib/format';
+import { formatDate, relativeTime } from '@/lib/format';
 import { cn } from '@/lib/cn';
 import { useApp } from '@/stores/app';
 import { useNotifications } from '@/stores/notifications';
 import { Button } from '@/components/ui/Button';
+import { Dialog, DialogContent } from '@/components/ui/Dialog';
 import { Card, EmptyState, PageHeader, Spinner } from '@/components/ui/Misc';
 
 function kindIcon(kind: string) {
@@ -49,6 +52,7 @@ export function NotificationsPage() {
   const [items, setItems] = useState<NotificationItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [onlyUnread, setOnlyUnread] = useState(false);
+  const [detail, setDetail] = useState<NotificationItem | null>(null);
 
   const load = () => {
     setLoading(true);
@@ -74,6 +78,8 @@ export function NotificationsPage() {
   };
 
   const openItem = (item: NotificationItem) => {
+    setDetail(item);
+    if (item.readAt) return;
     void call('notifications.markRead', item.id)
       .then(() => {
         setItems((current) =>
@@ -81,15 +87,26 @@ export function NotificationsPage() {
             entry.id === item.id ? { ...entry, readAt: new Date().toISOString() } : entry,
           ),
         );
+        setDetail((current) =>
+          current && current.id === item.id ? { ...current, readAt: new Date().toISOString() } : current,
+        );
         void refreshUnread();
       })
       .catch(() => {});
-    const view = (item.route?.view as ReturnType<typeof useApp.getState>['view']) ?? 'dashboard';
-    navigate(view, { ...(item.route ?? {}) });
   };
+
+  const detailRoute = detail ? (detail.route?.view as string | undefined) : undefined;
+  const canOpenRoute = Boolean(detailRoute && detailRoute !== 'notifications');
 
   const unread = items.filter((item) => !item.readAt).length;
   const visible = onlyUnread ? items.filter((item) => !item.readAt) : items;
+
+  const goToRoute = () => {
+    if (!detail) return;
+    const view = (detail.route?.view as ReturnType<typeof useApp.getState>['view']) ?? 'dashboard';
+    setDetail(null);
+    navigate(view, { ...(detail.route ?? {}) });
+  };
 
   return (
     <div className="flex h-full flex-col">
@@ -197,6 +214,40 @@ export function NotificationsPage() {
           </Card>
         )}
       </div>
+
+      <Dialog open={Boolean(detail)} onOpenChange={(open) => (open ? null : setDetail(null))}>
+        {detail ? (
+          <DialogContent
+            title={detail.title}
+            description={`${kindLabel(detail.kind)} · ${formatDate(detail.createdAt, 'M月d日 HH:mm')} · ${relativeTime(detail.createdAt)}`}
+            footer={
+              <>
+                {detail.kind === 'portal' ? (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => void call('app.openExternal', 'https://my.sjtu.edu.cn/ui/message/')}
+                  >
+                    <ExternalLink className="size-3.5" /> 在交我办查看
+                  </Button>
+                ) : null}
+                <Button size="sm" variant="ghost" onClick={() => setDetail(null)}>
+                  关闭
+                </Button>
+                {canOpenRoute ? (
+                  <Button size="sm" onClick={goToRoute}>
+                    前往相关页面 <ArrowRight className="size-3.5" />
+                  </Button>
+                ) : null}
+              </>
+            }
+          >
+            <div className="selectable whitespace-pre-wrap break-words text-sm leading-relaxed text-ink-2">
+              {detail.body || '（无正文）'}
+            </div>
+          </DialogContent>
+        ) : null}
+      </Dialog>
     </div>
   );
 }
