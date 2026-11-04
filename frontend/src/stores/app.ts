@@ -46,7 +46,7 @@ export const useApp = create<AppStore>((set, get) => ({
     await useSettings.getState().load();
     const settings = useSettings.getState().state;
     set({
-      view: settings.lastView ?? 'dashboard',
+      view: 'dashboard',
       sidebarCollapsed: settings.sidebarCollapsed,
       onboardingOpen: !settings.onboardingCompleted,
       ready: true,
@@ -54,10 +54,6 @@ export const useApp = create<AppStore>((set, get) => ({
   },
   navigate: (view, params = {}) => {
     set({ view, params, commandOpen: false });
-    void useSettings.getState().set('lastView', view).catch(() => {});
-    if (view !== 'workspace') {
-      // keep workspace state warm; nothing to release here
-    }
   },
   toggleSidebar: () => {
     const next = !get().sidebarCollapsed;
