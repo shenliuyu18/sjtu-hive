@@ -2,6 +2,7 @@ package com.sjtuhive.app.ui
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import android.text.TextUtils
 import android.webkit.CookieManager
@@ -9,17 +10,25 @@ import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -34,6 +43,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.sjtuhive.app.data.CampusSession
@@ -58,6 +68,10 @@ fun MessagesScreen(
     var messages by remember { mutableStateOf(cached?.messages ?: emptyList()) }
     var unread by remember { mutableStateOf(cached?.unread ?: 0) }
     var reload by remember { mutableStateOf(0) }
+    var selected by remember { mutableStateOf<PortalMessage?>(null) }
+    val listState = rememberLazyListState()
+
+    BackHandler(enabled = selected != null) { selected = null }
 
     LaunchedEffect(loggedIn, reload) {
         if (!loggedIn) return@LaunchedEffect
@@ -116,6 +130,11 @@ fun MessagesScreen(
     }
 
     Column(Modifier.fillMaxSize()) {
+        val detail = selected
+        if (detail != null) {
+            MessageDetail(detail, onBack = { selected = null })
+            return@Column
+        }
         Column(Modifier.padding(start = 24.dp, end = 24.dp, top = 12.dp, bottom = 4.dp)) {
             Text("交我办消息", style = MaterialTheme.typography.headlineMedium)
             Text(
@@ -137,6 +156,7 @@ fun MessagesScreen(
             return@Column
         }
         LazyColumn(
+            state = listState,
             contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 120.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
@@ -146,6 +166,7 @@ fun MessagesScreen(
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(20.dp))
                         .background(MaterialTheme.colorScheme.surface)
+                        .clickable { selected = message }
                         .padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
@@ -190,8 +211,56 @@ fun MessagesScreen(
     }
 }
 
-/** jAccount 登录窗口：加载起始页，登录完成后由调用方刷新并保存会话。 */
-@SuppressLint("SetJavaScriptEnabled")
+@Composable
+private fun MessageDetail(message: PortalMessage, onBack: () -> Unit) {
+    val context = LocalContext.current
+    Column(Modifier.fillMaxSize()) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(start = 8.dp, end = 12.dp, top = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TextButton(onClick = onBack) { Text("← 返回") }
+            Text("消息详情", style = MaterialTheme.typography.titleMedium)
+        }
+        Column(
+            Modifier
+                .weight(1f)
+                .verticalScroll(rememberScrollState())
+                .padding(start = 24.dp, end = 24.dp, bottom = 120.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text(message.title, style = MaterialTheme.typography.titleLarge)
+            Text(
+                listOf(message.source, message.createdAt).filter { it.isNotBlank() }.joinToString(" · "),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            SelectionContainer {
+                Text(
+                    message.body.ifBlank { "（没有更多内容）" },
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+            val link = message.url?.takeIf { it.isNotBlank() }
+            if (link != null) {
+                TextButton(
+                    onClick = {
+                        runCatching {
+                            context.startActivity(
+                                Intent(Intent.ACTION_VIEW, Uri.parse(link))
+                                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                            )
+                        }
+                    },
+                ) { Text("在浏览器打开") }
+            }
+        }
+    }
+}
+
+/** jAccount 登录窗口：加载起始页，登录完成后由调用方刷新并保存会话。 */@SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun LoginWebView(
     startUrl: String = "https://my.sjtu.edu.cn/ui/message/",

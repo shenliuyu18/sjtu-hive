@@ -8,6 +8,7 @@ import android.graphics.Color as AndroidColor
 import android.graphics.pdf.PdfRenderer
 import android.media.MediaPlayer
 import android.os.ParcelFileDescriptor
+import android.widget.Toast
 import android.widget.VideoView
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
@@ -42,6 +43,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -62,6 +64,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.zip.ZipFile
@@ -71,6 +74,8 @@ data class PreviewRequest(
     val title: String,
     val fileName: String,
     val load: suspend () -> File,
+    /** 返回可展示的提示文案；null 表示该来源不提供下载。 */
+    val download: (suspend () -> String)? = null,
 )
 
 object PreviewHost {
@@ -113,7 +118,9 @@ private fun FilePreviewScreen(request: PreviewRequest) {
     var error by remember(request) { mutableStateOf<String?>(null) }
     var loading by remember(request) { mutableStateOf(true) }
     var fullscreen by remember { mutableStateOf(false) }
+    var downloading by remember { mutableStateOf(false) }
     val kind = remember(request.fileName) { kindOf(request.fileName) }
+    val scope = rememberCoroutineScope()
 
     BackHandler {
         if (fullscreen) fullscreen = false else PreviewHost.close()
@@ -170,6 +177,22 @@ private fun FilePreviewScreen(request: PreviewRequest) {
                         )
                     }
                     TextButton(onClick = { fullscreen = true }) { Text("全屏") }
+                    if (request.download != null) {
+                        TextButton(
+                            enabled = !downloading,
+                            onClick = {
+                                downloading = true
+                                scope.launch {
+                                    runCatching { request.download?.invoke() }
+                                        .onSuccess { message ->
+                                            if (!message.isNullOrBlank()) toast(context, message)
+                                        }
+                                        .onFailure { toast(context, it.message ?: "下载失败") }
+                                    downloading = false
+                                }
+                            },
+                        ) { Text(if (downloading) "下载中…" else "下载") }
+                    }
                     TextButton(onClick = { PreviewHost.close() }) { Text("关闭") }
                 }
             }
@@ -618,4 +641,31 @@ private fun Context.findActivity(): Activity? {
         current = current.baseContext
     }
     return current as? Activity
+}
+
+private fun toast(context: Context, message: String) {
+    Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+}
+
+/** 把缓存文件写进系统“下载”目录，供预览页的下载按钮使用。 */
+fun saveToDownloads(context: Context, file: File, displayName: String) {
+    val resolver = context.contentResolver
+    val values = android.content.ContentValues().apply {
+        put(android.provider.MediaStore.Downloads.DISPLAY_NAME, displayName)
+        put(android.provider.MediaStore.Downloads.RELATIVE_PATH, android.os.Environment.DIRECTORY_DOWNLOADS)
+        put(android.provider.MediaStore.Downloads.IS_PENDING, 1)
+    }
+    val uri = resolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+        ?: error("无法创建下载文件")
+    try {
+        resolver.openOutputStream(uri)?.use { output ->
+            file.inputStream().use { it.copyTo(output) }
+        } ?: error("无法写入下载文件")
+        values.clear()
+        values.put(android.provider.MediaStore.Downloads.IS_PENDING, 0)
+        resolver.update(uri, values, null, null)
+    } catch (error: Exception) {
+        runCatching { resolver.delete(uri, null, null) }
+        throw error
+    }
 }

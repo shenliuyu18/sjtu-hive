@@ -2,10 +2,10 @@ package com.sjtuhive.app.ui
 
 import android.app.DownloadManager
 import android.content.Context
-import android.content.Intent
 import android.net.Uri
 import android.os.Environment
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -52,15 +52,17 @@ fun CloudPanScreen(
     onLogin: () -> Unit,
 ) {
     val api = remember { CloudPanApi(context) }
-    val scope = rememberCoroutineScope()
     val cached = HiveUiCache.cloud
     var path by remember { mutableStateOf(cached?.path ?: "") }
     var files by remember { mutableStateOf(cached?.files ?: emptyList()) }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var reload by remember { mutableStateOf(0) }
-    var selected by remember { mutableStateOf<CloudFile?>(null) }
-    var busy by remember { mutableStateOf(false) }
+
+    // 二级目录里按返回键应回上一级，而不是直接退出应用。
+    BackHandler(enabled = path.isNotEmpty()) {
+        path = path.substringBeforeLast('/', "")
+    }
 
     LaunchedEffect(loggedIn, path, reload) {
         if (!loggedIn) return@LaunchedEffect
@@ -179,7 +181,19 @@ fun CloudPanScreen(
                             if (file.directory) {
                                 path = file.path
                             } else {
-                                selected = file
+                                // 点击文件直接进入预览，下载按钮放在预览页里。
+                                PreviewHost.open(
+                                    PreviewRequest(
+                                        title = file.name,
+                                        fileName = file.name,
+                                        load = { api.downloadToCache(file.path, file.name) },
+                                        download = {
+                                            val url = api.fileUrl(file.path, download = true)
+                                            startDownload(context, url, file.name)
+                                            "已开始下载到系统下载目录"
+                                        },
+                                    ),
+                                )
                             }
                         }
                         .padding(horizontal = 14.dp, vertical = 12.dp),
@@ -208,82 +222,16 @@ fun CloudPanScreen(
             }
         }
     }
+}
 
-    selected?.let { file ->
-        AlertDialog(
-            onDismissRequest = { if (!busy) selected = null },
-            title = { Text(file.name) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(
-                        "可直接在应用内预览 PDF、图片、文本、音视频与 Office 文档；也可以交给系统应用或下载。",
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                    TextButton(
-                        enabled = !busy,
-                        onClick = {
-                            busy = true
-                            scope.launch {
-                                runCatching { api.fileUrl(file.path, download = false) }
-                                    .onSuccess { url ->
-                                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
-                                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                        runCatching { context.startActivity(intent) }
-                                            .onFailure { toast(context, "没有可打开该文件的应用") }
-                                    }
-                                    .onFailure { toast(context, it.message ?: "打开失败") }
-                                busy = false
-                                selected = null
-                            }
-                        },
-                    ) { Text("用其他应用打开") }
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    enabled = !busy,
-                    onClick = {
-                        val target = file
-                        selected = null
-                        PreviewHost.open(
-                            PreviewRequest(title = target.name, fileName = target.name) {
-                                api.downloadToCache(target.path, target.name)
-                            },
-                        )
-                    },
-                ) { Text("预览") }
-            },
-            dismissButton = {
-                TextButton(
-                    enabled = !busy,
-                    onClick = {
-                        busy = true
-                        scope.launch {
-                            runCatching { api.fileUrl(file.path, download = true) }
-                                .onSuccess { url ->
-                                    val request = DownloadManager.Request(Uri.parse(url))
-                                        .setTitle(file.name)
-                                        .setNotificationVisibility(
-                                            DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED,
-                                        )
-                                        .setDestinationInExternalPublicDir(
-                                            Environment.DIRECTORY_DOWNLOADS,
-                                            file.name,
-                                        )
-                                    val manager = context.getSystemService(DownloadManager::class.java)
-                                    manager?.enqueue(request)
-                                        ?: throw IllegalStateException("系统下载器不可用")
-                                    toast(context, "已加入下载")
-                                }
-                                .onFailure { toast(context, it.message ?: "下载失败") }
-                            busy = false
-                            selected = null
-                        }
-                    },
-                ) { Text("下载") }
-            },
-        )
-    }
+private fun startDownload(context: Context, url: String, name: String) {
+    val request = DownloadManager.Request(Uri.parse(url))
+        .setTitle(name)
+        .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+        .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, name)
+    val manager = context.getSystemService(DownloadManager::class.java)
+        ?: throw IllegalStateException("系统下载器不可用")
+    manager.enqueue(request)
 }
 
 private fun toast(context: Context, message: String) {
