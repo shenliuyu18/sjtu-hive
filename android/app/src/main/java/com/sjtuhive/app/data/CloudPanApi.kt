@@ -242,7 +242,7 @@ class CloudPanApi(private val context: Context) {
 
     private fun escapePath(value: String): String {
         if (value.isEmpty()) return ""
-        return value.split("/").joinToString("/") { enc(it) }
+        return value.split("/").joinToString("/") { enc(it).replace("+", "%20") }
     }
 
     private fun longValue(item: JSONObject, key: String): Long {

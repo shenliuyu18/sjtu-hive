@@ -215,7 +215,8 @@ private fun FilePreviewScreen(request: PreviewRequest) {
                         PreviewKind.TEXT -> TextPreview(file!!)
                         PreviewKind.AUDIO -> AudioPreview(file!!, request.title)
                         PreviewKind.VIDEO -> VideoPreview(file!!)
-                        PreviewKind.DOCX, PreviewKind.XLSX, PreviewKind.PPTX -> OfficePreview(file!!, request.fileName)
+                        PreviewKind.DOCX, PreviewKind.XLSX -> OfficePreview(file!!, request.fileName)
+                        PreviewKind.PPTX -> PptxSlidesPreview(file!!)
                         PreviewKind.UNKNOWN -> Column(
                             Modifier
                                 .fillMaxSize()
@@ -374,6 +375,61 @@ private fun PdfPreview(file: File) {
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun PptxSlidesPreview(file: File) {
+    val context = LocalContext.current
+    val document = remember(file, context) { runCatching { PptxDocument(file, context.cacheDir) }.getOrNull() }
+    DisposableEffect(file) {
+        onDispose { document?.close() }
+    }
+    if (document == null) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text("幻灯片解析失败", color = MaterialTheme.colorScheme.error)
+        }
+        return
+    }
+    BoxWithConstraints(Modifier.fillMaxSize().background(Color(0xFF111317))) {
+        val density = LocalDensity.current
+        val targetWidth = with(density) { minOf(maxWidth.toPx(), 1440f) }.toInt()
+        LazyColumn {
+            items(document.slideCount) { index ->
+                PptxSlidePage(document, index, targetWidth)
+            }
+        }
+    }
+}
+
+@Composable
+private fun PptxSlidePage(document: PptxDocument, index: Int, targetWidth: Int) {
+    var bitmap by remember(index, targetWidth) { mutableStateOf<Bitmap?>(null) }
+    LaunchedEffect(index, targetWidth) {
+        if (bitmap == null) {
+            bitmap = withContext(Dispatchers.IO) {
+                runCatching { document.render(index, targetWidth) }.getOrNull()
+            }
+        }
+    }
+    val image = bitmap
+    if (image != null) {
+        Image(
+            bitmap = image.asImageBitmap(),
+            contentDescription = "第 ${index + 1} 页",
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 4.dp),
+        )
+    } else {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 4.dp)
+                .aspectRatio(1f / document.aspectRatio)
+                .background(Color(0xFF1B1E24)),
+            contentAlignment = Alignment.Center,
+        ) { CircularProgressIndicator() }
     }
 }
 
@@ -541,7 +597,6 @@ private object OfficeText {
             when (ext) {
                 "docx" -> docx(zip)
                 "xlsx" -> xlsx(zip)
-                "pptx" -> pptx(zip)
                 else -> ""
             }
         }
@@ -611,19 +666,6 @@ private object OfficeText {
                 }
         }
         return builder.toString().trim()
-    }
-
-    private fun pptx(zip: ZipFile): String {
-        val slides = zip.entries().toList()
-            .map { it.name }
-            .filter { it.startsWith("ppt/slides/slide") && it.endsWith(".xml") }
-            .sortedBy { it.removePrefix("ppt/slides/slide").removeSuffix(".xml").toIntOrNull() ?: 0 }
-        return slides.mapIndexed { index, name ->
-            val text = Regex("<a:t>(.*?)</a:t>", RegexOption.DOT_MATCHES_ALL)
-                .findAll(zipText(zip, name).orEmpty())
-                .joinToString("\n") { unescape(it.groupValues[1]) }
-            "第 ${index + 1} 页\n$text"
-        }.joinToString("\n\n").trim()
     }
 
     private fun unescape(value: String): String = value
