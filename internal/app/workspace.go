@@ -386,8 +386,10 @@ func formatOf(pathValue, ext string, isText bool) string {
 		return "docx"
 	case "xlsx":
 		return "xlsx"
-	case "pptx", "ppt", "doc", "xls":
+	case "pptx":
 		return "pptx"
+	case "ppt", "doc", "xls":
+		return "binary"
 	case "png", "jpg", "jpeg", "gif", "webp", "bmp", "avif", "ico", "svg":
 		return "image"
 	case "html", "htm":

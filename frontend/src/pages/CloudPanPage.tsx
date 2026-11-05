@@ -147,7 +147,7 @@ export function CloudPanPage() {
       if (!target) {
         return;
       }
-      const bytes = await call<string>('cloudPan.download', file.path, '', target);
+      const bytes = await call<string>('cloudPan.download', file.path, target, '');
       toast.success(`已保存 ${formatBytes(Number(bytes) || file.size)} 到 ${target}`);
     } catch (cause) {
       toast.error(cause instanceof Error ? cause.message : '下载失败');

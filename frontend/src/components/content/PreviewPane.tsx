@@ -12,7 +12,6 @@ import {
   Video,
 } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
-import { createPortal } from 'react-dom';
 import type { DocumentContent } from '@/lib/models';
 import { formatBytes, formatDate } from '@/lib/format';
 import { call } from '@/lib/bridge';
@@ -23,6 +22,7 @@ import { HtmlFrame } from './HtmlFrame';
 import { MarkdownView } from './MarkdownView';
 import { DocxPreview } from './DocxPreview';
 import { SheetPreview } from './SheetPreview';
+import { PptxPreview } from './PptxPreview';
 
 function formatLabel(format: string) {
   const labels: Record<string, string> = {
@@ -152,20 +152,7 @@ export function PreviewPane({
       case 'xlsx':
         return doc.resourceUrl ? <SheetPreview url={doc.resourceUrl} /> : null;
       case 'pptx':
-        return (
-          <EmptyState
-            icon={FileQuestion}
-            title="PowerPoint 需要系统 Office 打开"
-            description={doc.message ?? '内嵌预览暂不支持 PPTX/PPT；请用系统 PowerPoint 或 WPS 打开。'}
-            action={
-              doc.path ? (
-                <Button size="sm" onClick={openLocal}>
-                  <FolderOpen className="size-3.5" /> 用默认应用打开
-                </Button>
-              ) : null
-            }
-          />
-        );
+        return doc.resourceUrl ? <PptxPreview url={doc.resourceUrl} /> : null;
       case 'video':
         return (
           <div className="flex h-full items-center justify-center bg-black/90 p-4">
@@ -229,7 +216,7 @@ export function PreviewPane({
         );
     }
   };
-  const framed = ['html', 'pdf', 'docx', 'xlsx', 'video', 'audio'].includes(doc.format);
+  const framed = ['html', 'pdf', 'docx', 'xlsx', 'pptx', 'video', 'audio'].includes(doc.format);
 
   const pane = (
     <div
@@ -268,5 +255,5 @@ export function PreviewPane({
       <div className={cn('min-h-0 flex-1', !framed && 'overflow-hidden')}>{body()}</div>
     </div>
   );
-  return fullscreen ? createPortal(pane, document.body) : pane;
+  return pane;
 }

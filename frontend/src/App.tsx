@@ -145,7 +145,7 @@ export default function App() {
                   {error}
                 </div>
               ) : null}
-              <div key={view} className="h-full animate-fade-in">
+              <div key={view} className="h-full">
                 {pageFor(view)}
               </div>
             </main>
