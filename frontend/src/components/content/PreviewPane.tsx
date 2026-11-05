@@ -12,6 +12,7 @@ import {
   Video,
 } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import type { DocumentContent } from '@/lib/models';
 import { formatBytes, formatDate } from '@/lib/format';
 import { call } from '@/lib/bridge';
@@ -230,14 +231,14 @@ export function PreviewPane({
   };
   const framed = ['html', 'pdf', 'docx', 'xlsx', 'video', 'audio'].includes(doc.format);
 
-  return (
+  const pane = (
     <div
       className={cn(
         'flex h-full min-h-0 flex-col bg-surface',
-        fullscreen && 'fixed inset-0 z-[60] h-auto shadow-[var(--shadow-pop)]',
+        fullscreen && 'fixed inset-0 z-[80] h-auto shadow-[var(--shadow-pop)]',
       )}
     >
-      <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-line px-4 py-3">
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-line bg-surface px-4 py-3">
         <div className="min-w-0">
           <div className="truncate text-sm font-semibold text-ink" title={doc.title}>
             {doc.title}
@@ -253,17 +254,19 @@ export function PreviewPane({
           {actions}
           <Button
             size="sm"
-            variant="ghost"
+            variant={fullscreen ? 'secondary' : 'ghost'}
             onClick={() => setFullscreen((value) => !value)}
             title={fullscreen ? '退出全屏（Esc）' : '全屏预览'}
           >
             {fullscreen ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
             {fullscreen ? '退出全屏' : '全屏'}
           </Button>
+          {fullscreen ? <span className="text-[0.62rem] text-ink-3">Esc</span> : null}
         </div>
       </div>
       <MetaBar doc={doc} />
       <div className={cn('min-h-0 flex-1', !framed && 'overflow-hidden')}>{body()}</div>
     </div>
   );
+  return fullscreen ? createPortal(pane, document.body) : pane;
 }
