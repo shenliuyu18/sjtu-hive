@@ -34,7 +34,9 @@ internal class PptxDocument(private val file: File, private val cacheDir: File) 
     private val zip = ZipFile(file)
     private val theme = ThemeColors()
     private val slides: List<SlideRef>
+    private val slideVideos: List<String?>
     private val framesDir = File(cacheDir, "pptx-frames")
+    private val videosDir = File(cacheDir, "pptx-videos")
     private val videoFrames = mutableMapOf<String, Bitmap?>()
     private val cache = object : LinkedHashMap<Long, Bitmap>(4, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Long, Bitmap>?): Boolean = size > 6
@@ -61,6 +63,41 @@ internal class PptxDocument(private val file: File, private val cacheDir: File) 
                 .sortedBy { it.removePrefix("ppt/slides/slide").removeSuffix(".xml").toIntOrNull() ?: 0 }
                 .map { SlideRef(it, layoutOf(it)) }
         }
+        slideVideos = slides.map { videoPartOf(it.path) }
+    }
+
+    fun videoOf(index: Int): String? = slideVideos.getOrNull(index)
+
+    @Synchronized
+    fun videoFile(part: String): File? = runCatching {
+        val name = part.substringAfterLast('/').replace(Regex("[\\\\/:*?\"<>|]"), "_")
+        val target = File(videosDir, name)
+        if (target.exists() && target.length() > 0) return target
+        videosDir.mkdirs()
+        val entry = zip.getEntry(part) ?: return null
+        val temp = File(videosDir, "$name.part")
+        zip.getInputStream(entry).use { input ->
+            temp.outputStream().use { output -> input.copyTo(output) }
+        }
+        if (!temp.renameTo(target)) {
+            temp.copyTo(target, overwrite = true)
+            temp.delete()
+        }
+        target
+    }.getOrNull()
+
+    private fun videoPartOf(slidePath: String): String? {
+        val slide = xml(slidePath) ?: return null
+        val rels = relationships(relsName(slidePath))
+        val pictures = slide.getElementsByTagName("p:pic")
+        for (index in 0 until pictures.length) {
+            val picture = pictures.item(index) as? Element ?: continue
+            val link = (picture.getElementsByTagName("a:videoFile").item(0) as? Element)?.attr("r:link")
+            val embed = (picture.getElementsByTagName("p14:media").item(0) as? Element)?.attr("r:embed")
+            val part = rels[link]?.first ?: rels[embed]?.first ?: continue
+            return part
+        }
+        return null
     }
 
     val slideCount: Int get() = slides.size

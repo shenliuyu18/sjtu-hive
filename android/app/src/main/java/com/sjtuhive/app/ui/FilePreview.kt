@@ -8,6 +8,10 @@ import android.graphics.Color as AndroidColor
 import android.graphics.pdf.PdfRenderer
 import android.media.MediaPlayer
 import android.os.ParcelFileDescriptor
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import android.widget.Toast
 import android.widget.VideoView
 import androidx.activity.compose.BackHandler
@@ -62,11 +66,14 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.webkit.WebViewAssetLoader
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import java.util.zip.ZipFile
 
 /** 内置预览：云盘文件与邮件附件统一走这个入口。 */
@@ -91,7 +98,7 @@ object PreviewHost {
     }
 }
 
-private enum class PreviewKind { PDF, IMAGE, TEXT, AUDIO, VIDEO, DOCX, XLSX, PPTX, UNKNOWN }
+private enum class PreviewKind { PDF, IMAGE, TEXT, AUDIO, VIDEO, DOCX, XLSX, PPTX, DOC, PPT, XLS_LEGACY, UNKNOWN }
 
 private fun kindOf(fileName: String): PreviewKind = when (fileName.substringAfterLast('.', "").lowercase()) {
     "pdf" -> PreviewKind.PDF
@@ -102,6 +109,9 @@ private fun kindOf(fileName: String): PreviewKind = when (fileName.substringAfte
     "docx" -> PreviewKind.DOCX
     "xlsx" -> PreviewKind.XLSX
     "pptx" -> PreviewKind.PPTX
+    "doc", "dot" -> PreviewKind.DOC
+    "ppt", "pot", "pps" -> PreviewKind.PPT
+    "xls", "xlt" -> PreviewKind.XLS_LEGACY
     else -> PreviewKind.UNKNOWN
 }
 
@@ -217,6 +227,9 @@ private fun FilePreviewScreen(request: PreviewRequest) {
                         PreviewKind.VIDEO -> VideoPreview(file!!)
                         PreviewKind.DOCX, PreviewKind.XLSX -> OfficePreview(file!!, request.fileName)
                         PreviewKind.PPTX -> PptxSlidesPreview(file!!)
+                        PreviewKind.DOC -> LegacyOfficePreview(file!!, "doc")
+                        PreviewKind.PPT -> LegacyOfficePreview(file!!, "ppt")
+                        PreviewKind.XLS_LEGACY -> LegacyOfficePreview(file!!, "xls")
                         PreviewKind.UNKNOWN -> Column(
                             Modifier
                                 .fillMaxSize()
@@ -381,29 +394,74 @@ private fun PdfPreview(file: File) {
 @Composable
 private fun PptxSlidesPreview(file: File) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val document = remember(file, context) { runCatching { PptxDocument(file, context.cacheDir) }.getOrNull() }
+    var playing by remember { mutableStateOf<File?>(null) }
+    var preparing by remember { mutableStateOf(false) }
     DisposableEffect(file) {
         onDispose { document?.close() }
     }
+    BackHandler(enabled = playing != null) { playing = null }
     if (document == null) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text("幻灯片解析失败", color = MaterialTheme.colorScheme.error)
         }
         return
     }
-    BoxWithConstraints(Modifier.fillMaxSize().background(Color(0xFF111317))) {
-        val density = LocalDensity.current
-        val targetWidth = with(density) { minOf(maxWidth.toPx(), 1440f) }.toInt()
-        LazyColumn {
-            items(document.slideCount) { index ->
-                PptxSlidePage(document, index, targetWidth)
+    Box(Modifier.fillMaxSize().background(Color(0xFF111317))) {
+        BoxWithConstraints(Modifier.fillMaxSize()) {
+            val density = LocalDensity.current
+            val targetWidth = with(density) { minOf(maxWidth.toPx(), 1440f) }.toInt()
+            LazyColumn {
+                items(document.slideCount) { index ->
+                    PptxSlidePage(
+                        document = document,
+                        index = index,
+                        targetWidth = targetWidth,
+                        videoPart = document.videoOf(index),
+                        onPlay = { part ->
+                            if (!preparing) {
+                                preparing = true
+                                scope.launch {
+                                    val video = withContext(Dispatchers.IO) { document.videoFile(part) }
+                                    if (video != null) playing = video
+                                    preparing = false
+                                }
+                            }
+                        },
+                    )
+                }
+            }
+        }
+        if (playing != null) {
+            Box(Modifier.fillMaxSize().background(Color.Black)) {
+                VideoPreview(playing!!)
+                TextButton(
+                    onClick = { playing = null },
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(8.dp)
+                        .clip(RoundedCornerShape(24.dp))
+                        .background(Color.Black.copy(alpha = 0.55f)),
+                ) { Text("关闭", color = Color.White) }
+            }
+        }
+        if (preparing) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator()
             }
         }
     }
 }
 
 @Composable
-private fun PptxSlidePage(document: PptxDocument, index: Int, targetWidth: Int) {
+private fun PptxSlidePage(
+    document: PptxDocument,
+    index: Int,
+    targetWidth: Int,
+    videoPart: String?,
+    onPlay: (String) -> Unit,
+) {
     var bitmap by remember(index, targetWidth) { mutableStateOf<Bitmap?>(null) }
     LaunchedEffect(index, targetWidth) {
         if (bitmap == null) {
@@ -413,23 +471,35 @@ private fun PptxSlidePage(document: PptxDocument, index: Int, targetWidth: Int) 
         }
     }
     val image = bitmap
-    if (image != null) {
-        Image(
-            bitmap = image.asImageBitmap(),
-            contentDescription = "第 ${index + 1} 页",
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 4.dp),
-        )
-    } else {
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 4.dp)
-                .aspectRatio(1f / document.aspectRatio)
-                .background(Color(0xFF1B1E24)),
-            contentAlignment = Alignment.Center,
-        ) { CircularProgressIndicator() }
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+    ) {
+        if (image != null) {
+            Image(
+                bitmap = image.asImageBitmap(),
+                contentDescription = "第 ${index + 1} 页",
+                modifier = Modifier.fillMaxWidth(),
+            )
+        } else {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(1f / document.aspectRatio)
+                    .background(Color(0xFF1B1E24)),
+                contentAlignment = Alignment.Center,
+            ) { CircularProgressIndicator() }
+        }
+        if (videoPart != null && image != null) {
+            TextButton(
+                onClick = { onPlay(videoPart) },
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(Color.Black.copy(alpha = 0.6f)),
+            ) { Text("▶ 播放视频", color = Color.White) }
+        }
     }
 }
 
@@ -542,7 +612,73 @@ private fun VideoPreview(file: File) {
                 controller.setAnchorView(this)
                 setMediaController(controller)
                 setVideoPath(file.absolutePath)
-                setOnPreparedListener { it.isLooping = false }
+                setOnPreparedListener {
+                    it.isLooping = false
+                    it.start()
+                    controller.show(0)
+                }
+            }
+        },
+        modifier = Modifier.fillMaxSize(),
+    )
+}
+
+private object LegacyFileStore {
+    private val files = ConcurrentHashMap<String, File>()
+
+    fun register(file: File): String {
+        val token = UUID.randomUUID().toString().replace("-", "")
+        files[token] = file
+        return token
+    }
+
+    fun remove(token: String) {
+        files.remove(token)
+    }
+
+    fun find(token: String): File? = files[token]
+}
+
+/** 旧版二进制 Office（doc/ppt/xls）由随包的 JS 引擎渲染在 WebView 中。 */
+@Composable
+private fun LegacyOfficePreview(file: File, kind: String) {
+    val context = LocalContext.current
+    val token = remember(file) { LegacyFileStore.register(file) }
+    DisposableEffect(token) {
+        onDispose { LegacyFileStore.remove(token) }
+    }
+    val loader = remember(context) {
+        WebViewAssetLoader.Builder()
+            .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(context))
+            .addPathHandler(
+                "/user/",
+                object : WebViewAssetLoader.PathHandler {
+                    override fun handle(path: String): WebResourceResponse? {
+                        val target = LegacyFileStore.find(path.trim('/')) ?: return null
+                        return WebResourceResponse("application/octet-stream", null, target.inputStream())
+                    }
+                },
+            )
+            .build()
+    }
+    AndroidView(
+        factory = { ctx ->
+            WebView(ctx).apply {
+                setBackgroundColor(AndroidColor.rgb(242, 243, 245))
+                settings.javaScriptEnabled = true
+                settings.domStorageEnabled = true
+                settings.allowFileAccess = false
+                settings.allowContentAccess = false
+                settings.setSupportZoom(true)
+                settings.builtInZoomControls = true
+                settings.displayZoomControls = false
+                webViewClient = object : WebViewClient() {
+                    override fun shouldInterceptRequest(
+                        view: WebView,
+                        request: WebResourceRequest,
+                    ): WebResourceResponse? = loader.shouldInterceptRequest(request.url)
+                }
+                loadUrl("https://appassets.androidplatform.net/assets/legacy/viewer.html?kind=$kind&file=/user/$token")
             }
         },
         modifier = Modifier.fillMaxSize(),

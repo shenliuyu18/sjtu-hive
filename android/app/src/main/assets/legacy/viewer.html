@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=5,user-scalable=yes">
+<title>Office 预览</title>
+<style>
+  html, body { margin: 0; padding: 0; background: #f2f3f5; color: #172033; }
+  body { font-family: system-ui, -apple-system, "Microsoft YaHei", sans-serif; }
+  #status { padding: 32px 20px; text-align: center; color: #667085; font-size: 14px; line-height: 1.6; }
+  #host { padding: 8px; }
+  .sheet { overflow: auto; background: #fff; }
+  table.xls { border-collapse: collapse; font-size: 12px; background: #fff; }
+  table.xls th, table.xls td { border: 1px solid #d0d5dd; padding: 4px 8px; text-align: left; vertical-align: top; white-space: pre-wrap; }
+  table.xls th { background: #f2f4f7; font-weight: 600; }
+</style>
+</head>
+<body>
+<div id="status">正在解析…</div>
+<div id="host"></div>
+<script src="viewer.js"></script>
+<script>
+  (async () => {
+    const status = document.getElementById('status');
+    const params = new URLSearchParams(location.search);
+    const kind = params.get('kind') || '';
+    const file = params.get('file') || '';
+    try {
+      const response = await fetch(file);
+      if (!response.ok) throw new Error('读取文件失败（HTTP ' + response.status + '）');
+      const buffer = await response.arrayBuffer();
+      status.remove();
+      await LegacyViewer.render(document.getElementById('host'), kind, buffer);
+    } catch (error) {
+      status.textContent = '预览失败：' + (error && error.message ? error.message : error);
+      status.style.color = '#b42318';
+    }
+  })();
+</script>
+</body>
+</html>
