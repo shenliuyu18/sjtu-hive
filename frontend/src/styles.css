@@ -387,3 +387,23 @@
 .dark .cal-lilac { background: rgba(167, 139, 250, 0.16); color: #c4b5fd; }
 .dark .cal-slate { background: rgba(148, 163, 184, 0.14); color: #cbd5e1; }
 .dark .cal-danger { background: rgba(248, 113, 113, 0.18); color: #fecaca; }
+
+.pptx-video-play {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  z-index: 6;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 999px;
+  background: rgba(15, 18, 24, 0.78);
+  padding: 0.4rem 0.8rem;
+  color: #fff;
+  font-size: 0.72rem;
+  cursor: pointer;
+  backdrop-filter: blur(6px);
+}
+.pptx-video-play:hover {
+  background: rgba(32, 38, 50, 0.92);
+}

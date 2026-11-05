@@ -23,6 +23,8 @@ import { MarkdownView } from './MarkdownView';
 import { DocxPreview } from './DocxPreview';
 import { SheetPreview } from './SheetPreview';
 import { PptxPreview } from './PptxPreview';
+import { LegacyDocPreview } from './LegacyDocPreview';
+import { LegacyPptPreview } from './LegacyPptPreview';
 
 function formatLabel(format: string) {
   const labels: Record<string, string> = {
@@ -34,6 +36,8 @@ function formatLabel(format: string) {
     docx: 'Word',
     xlsx: 'Excel',
     pptx: 'PowerPoint',
+    doc: 'Word（旧版）',
+    ppt: 'PowerPoint（旧版）',
     video: '视频',
     audio: '音频',
     link: '链接',
@@ -153,6 +157,10 @@ export function PreviewPane({
         return doc.resourceUrl ? <SheetPreview url={doc.resourceUrl} /> : null;
       case 'pptx':
         return doc.resourceUrl ? <PptxPreview url={doc.resourceUrl} /> : null;
+      case 'doc':
+        return doc.resourceUrl ? <LegacyDocPreview url={doc.resourceUrl} /> : null;
+      case 'ppt':
+        return doc.resourceUrl ? <LegacyPptPreview url={doc.resourceUrl} /> : null;
       case 'video':
         return (
           <div className="flex h-full items-center justify-center bg-black/90 p-4">
@@ -216,7 +224,7 @@ export function PreviewPane({
         );
     }
   };
-  const framed = ['html', 'pdf', 'docx', 'xlsx', 'pptx', 'video', 'audio'].includes(doc.format);
+  const framed = ['html', 'pdf', 'docx', 'xlsx', 'pptx', 'doc', 'ppt', 'video', 'audio'].includes(doc.format);
 
   const pane = (
     <div
