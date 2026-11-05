@@ -36,7 +36,10 @@ internal class PptxDocument(private val file: File, private val cacheDir: File) 
     private val slides: List<SlideRef>
     private val slideVideos: List<String?>
     private val framesDir = File(cacheDir, "pptx-frames")
-    private val videosDir = File(cacheDir, "pptx-videos")
+    private val videosDir = File(
+        File(cacheDir, "pptx-videos"),
+        Integer.toHexString("${file.absolutePath}|${file.length()}|${file.lastModified()}".hashCode()),
+    )
     private val videoFrames = mutableMapOf<String, Bitmap?>()
     private val cache = object : LinkedHashMap<Long, Bitmap>(4, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Long, Bitmap>?): Boolean = size > 6

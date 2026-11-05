@@ -12,6 +12,8 @@ export function PptxPreview({ url }: { url: string }) {
   const videosRef = useRef<SlideVideo[]>([]);
   const openVideoRef = useRef<(part: string) => void>(() => {});
   const playingURLRef = useRef<string | null>(null);
+  const aliveRef = useRef(true);
+  const videoTokenRef = useRef(0);
   const [zoom, setZoom] = useState(1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -19,11 +21,16 @@ export function PptxPreview({ url }: { url: string }) {
   const bufferRef = useRef<{ url: string; data: ArrayBuffer } | null>(null);
 
   openVideoRef.current = (part) => {
+    const token = ++videoTokenRef.current;
     void (async () => {
       const entry = zipRef.current?.zip.file(part);
       if (!entry) return;
       const blob = await entry.async('blob');
       const next = URL.createObjectURL(blob);
+      if (!aliveRef.current || token !== videoTokenRef.current) {
+        URL.revokeObjectURL(next);
+        return;
+      }
       if (playingURLRef.current) URL.revokeObjectURL(playingURLRef.current);
       playingURLRef.current = next;
       setPlaying({ url: next, name: part.split('/').pop() ?? '视频' });
@@ -31,14 +38,19 @@ export function PptxPreview({ url }: { url: string }) {
   };
 
   const closeVideo = () => {
+    videoTokenRef.current += 1;
     if (playingURLRef.current) URL.revokeObjectURL(playingURLRef.current);
     playingURLRef.current = null;
     setPlaying(null);
   };
 
   useEffect(() => {
+    aliveRef.current = true;
     return () => {
+      aliveRef.current = false;
+      videoTokenRef.current += 1;
       if (playingURLRef.current) URL.revokeObjectURL(playingURLRef.current);
+      playingURLRef.current = null;
     };
   }, []);
 
@@ -67,6 +79,7 @@ export function PptxPreview({ url }: { url: string }) {
     const controller = new AbortController();
     setLoading(true);
     setError(null);
+    if (hostRef.current) hostRef.current.innerHTML = '';
 
     const decorate = (host: HTMLElement) => {
       const wrappers = Array.from(host.querySelectorAll<HTMLElement>('.pptx-preview-slide-wrapper'));
@@ -103,10 +116,12 @@ export function PptxPreview({ url }: { url: string }) {
         let zip = zipRef.current?.url === url ? zipRef.current.zip : null;
         if (!zip) {
           zip = await JSZip.loadAsync(buffer);
+          if (!alive) return;
           zipRef.current = { url, zip };
         }
-        videosRef.current = await findSlideVideos(zip);
+        const videos = await findSlideVideos(zip);
         if (!alive || !hostRef.current) return;
+        videosRef.current = videos;
         const host = hostRef.current;
         host.innerHTML = '';
         const viewer = init(host, { width: BASE_WIDTH, mode: 'list' });

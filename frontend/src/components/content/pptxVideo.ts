@@ -48,21 +48,33 @@ function first<T extends Element>(parent: Element | Document | null | undefined,
   return (parent?.getElementsByTagName(tag)[0] as T | undefined) ?? null;
 }
 
+// pptx-preview sorts slides by the first number in the part name, not by sldIdLst.
+function partOrder(part: string): number {
+  const match = part.match(/(\d+)/);
+  return match ? Number.parseInt(match[0], 10) : 1;
+}
+
 export async function findSlideVideos(zip: JSZip): Promise<SlideVideo[]> {
   const presentation = parseXml(await zip.file('ppt/presentation.xml')?.async('string'));
-  if (!presentation) return [];
   const size = first<Element>(presentation, 'p:sldSz');
   const slideWidth = Number(size?.getAttribute('cx') ?? 0) || 9144000;
   const slideHeight = Number(size?.getAttribute('cy') ?? 0) || 6858000;
 
-  const presentationRels = rels(parseXml(await zip.file('ppt/_rels/presentation.xml.rels')?.async('string')));
-  const order = Array.from(presentation.getElementsByTagName('p:sldId'))
-    .map((node) => {
-      const id = node.getAttribute('r:id');
-      const target = id ? presentationRels.get(id)?.target : undefined;
-      return target ? resolve('ppt', target) : null;
-    })
-    .filter((value): value is string => Boolean(value));
+  let order: string[] = [];
+  if (presentation) {
+    const presentationRels = rels(parseXml(await zip.file('ppt/_rels/presentation.xml.rels')?.async('string')));
+    order = Array.from(presentation.getElementsByTagName('p:sldId'))
+      .map((node) => {
+        const id = node.getAttribute('r:id');
+        const target = id ? presentationRels.get(id)?.target : undefined;
+        return target ? resolve('ppt', target) : null;
+      })
+      .filter((value): value is string => Boolean(value));
+  }
+  if (order.length === 0) {
+    order = Object.keys(zip.files).filter((name) => /^ppt\/slides\/[^/]+\.xml$/.test(name));
+  }
+  order.sort((left, right) => partOrder(left) - partOrder(right));
 
   const result: SlideVideo[] = [];
   for (let index = 0; index < order.length; index += 1) {

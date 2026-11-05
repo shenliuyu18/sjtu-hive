@@ -21,22 +21,67 @@ func NewUpdate(settings *Settings) *Update {
 	return &Update{settings: settings}
 }
 
-func compareVersions(left, right string) int {
-	normalize := func(value string) []int {
-		value = strings.TrimPrefix(strings.TrimSpace(value), "v")
-		if index := strings.IndexAny(value, "-+"); index >= 0 {
-			value = value[:index]
-		}
-		parts := strings.Split(value, ".")
-		result := make([]int, 0, len(parts))
-		for _, part := range parts {
-			number, _ := strconv.Atoi(part)
-			result = append(result, number)
-		}
-		return result
+func normalizeVersion(value string) ([]int, string) {
+	value = strings.TrimPrefix(strings.TrimSpace(value), "v")
+	if index := strings.IndexByte(value, '+'); index >= 0 {
+		value = value[:index]
 	}
-	a := normalize(left)
-	b := normalize(right)
+	prerelease := ""
+	if index := strings.IndexByte(value, '-'); index >= 0 {
+		prerelease = value[index+1:]
+		value = value[:index]
+	}
+	parts := strings.Split(value, ".")
+	result := make([]int, 0, len(parts))
+	for _, part := range parts {
+		number, _ := strconv.Atoi(part)
+		result = append(result, number)
+	}
+	return result, prerelease
+}
+
+func comparePrerelease(left, right string) int {
+	if left == right {
+		return 0
+	}
+	if left == "" {
+		return 1
+	}
+	if right == "" {
+		return -1
+	}
+	a, b := strings.Split(left, "."), strings.Split(right, ".")
+	for index := 0; index < len(a) && index < len(b); index++ {
+		if a[index] == b[index] {
+			continue
+		}
+		an, aerr := strconv.Atoi(a[index])
+		bn, berr := strconv.Atoi(b[index])
+		switch {
+		case aerr == nil && berr == nil:
+			if an > bn {
+				return 1
+			}
+			return -1
+		case aerr == nil:
+			return -1
+		case berr == nil:
+			return 1
+		case a[index] > b[index]:
+			return 1
+		default:
+			return -1
+		}
+	}
+	if len(a) > len(b) {
+		return 1
+	}
+	return -1
+}
+
+func compareVersions(left, right string) int {
+	a, aPre := normalizeVersion(left)
+	b, bPre := normalizeVersion(right)
 	for index := 0; index < len(a) || index < len(b); index++ {
 		var av, bv int
 		if index < len(a) {
@@ -52,7 +97,7 @@ func compareVersions(left, right string) int {
 			return -1
 		}
 	}
-	return 0
+	return comparePrerelease(aPre, bPre)
 }
 
 func (u *Update) Check() (map[string]any, error) {

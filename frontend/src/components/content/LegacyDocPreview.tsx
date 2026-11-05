@@ -19,6 +19,7 @@ export function LegacyDocPreview({ url }: { url: string }) {
         const buffer = await response.arrayBuffer();
         const rendered = await parseMsDocToHtml(buffer);
         if (!alive || !hostRef.current) return;
+        hostRef.current.innerHTML = '';
         mountMsDoc(hostRef.current, rendered);
       } catch (cause) {
         if (!alive || controller.signal.aborted) return;

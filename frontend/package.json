@@ -1,13 +1,13 @@
 {
   "name": "frontend",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.1.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "build:legacy": "esbuild scripts/legacy-android.ts --bundle --format=iife --global-name=LegacyViewer --platform=browser --target=chrome87 --outfile=../android-hive/app/src/main/assets/legacy/viewer.js"
+    "build:legacy": "esbuild scripts/legacy-android.ts --bundle --format=iife --global-name=LegacyViewer --platform=browser --target=chrome87 --outfile=../android/app/src/main/assets/legacy/viewer.js"
   },
   "dependencies": {
     "@codemirror/lang-markdown": "^6.5.2",

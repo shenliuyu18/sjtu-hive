@@ -58,6 +58,10 @@ export function LegacyPptPreview({ url }: { url: string }) {
         const scale = Math.min(1, (width - 32) / (opened.width || 960));
         hostRef.current.innerHTML = '';
         const mounted = await runtime.mount(hostRef.current, buffer, { scale, virtualize: true });
+        if (!alive) {
+          void mounted.close();
+          return;
+        }
         mountedRef.current = mounted;
       } catch (cause) {
         if (!alive || controller.signal.aborted) return;

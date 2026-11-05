@@ -360,8 +360,12 @@ var binaryExtensions = map[string]string{
 	"xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 	"pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
 	"doc":  "application/msword",
+	"dot":  "application/msword",
 	"xls":  "application/vnd.ms-excel",
+	"xlt":  "application/vnd.ms-excel",
 	"ppt":  "application/vnd.ms-powerpoint",
+	"pot":  "application/vnd.ms-powerpoint",
+	"pps":  "application/vnd.ms-powerpoint",
 	"zip":  "application/zip",
 	"rar":  "application/vnd.rar",
 	"7z":   "application/x-7z-compressed",
@@ -452,9 +456,6 @@ func (w *Workspace) Read(pathValue string) (DocumentContent, error) {
 		content.ResourceURL, err = w.media.AddFile(resolved, content.Title, contentType, time.Hour)
 		if err != nil {
 			return DocumentContent{}, err
-		}
-		if ext == "doc" || ext == "xls" || ext == "ppt" {
-			content.Message = "旧版 Office 格式无法内嵌预览，请用系统 Office 打开"
 		}
 		w.recordRecent(project.ID, resolved)
 		return content, nil

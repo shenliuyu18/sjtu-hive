@@ -736,3 +736,28 @@ func TestSchoolCalendarEventMapping(t *testing.T) {
 		t.Fatalf("fallback event: %+v", allDay)
 	}
 }
+
+func TestCompareVersions(t *testing.T) {
+	cases := []struct {
+		left, right string
+		want        int
+	}{
+		{"1.1.0", "1.0.0", 1},
+		{"v1.1.0", "1.1.0", 0},
+		{"1.1", "1.1.0", 0},
+		{"1.1.0-beta.2", "1.1.0", -1},
+		{"1.1.0", "1.1.0-beta.2", 1},
+		{"1.1.0-beta.2", "1.1.0-beta.10", -1},
+		{"1.1.0-beta", "1.1.0-alpha", 1},
+		{"1.1.0+build.9", "1.1.0+build.1", 0},
+		{"1.10.0", "1.9.9", 1},
+	}
+	for _, item := range cases {
+		if got := compareVersions(item.left, item.right); got != item.want {
+			t.Fatalf("compareVersions(%q, %q) = %d, want %d", item.left, item.right, got, item.want)
+		}
+		if got := compareVersions(item.right, item.left); got != -item.want {
+			t.Fatalf("reverse compareVersions(%q, %q) = %d, want %d", item.right, item.left, got, -item.want)
+		}
+	}
+}

@@ -11,7 +11,7 @@
 | 模块 | 能力 |
 | --- | --- |
 | 概览 | 今日课程、临近 DDL、未读邮件、账号状态、最近文件、快捷操作 |
-| 资料 / Canvas | Personal Access Token；课程/学期/文件树/模块/作业/页面/讨论同步；PDF、图片、文本、Markdown、HTML、DOCX、XLSX 预览；下载、批量导出、添加到本地项目；PPTX/旧版 Office 调用系统 Office 打开 |
+| 资料 / Canvas | Personal Access Token；课程/学期/文件树/模块/作业/页面/讨论同步；PDF、图片、文本、Markdown、HTML、DOCX、XLSX、PPTX、旧版 DOC/PPT/XLS 内置预览（PPTX 支持幻灯片内嵌视频）；下载、批量导出、添加到本地项目 |
 | 邮箱 | 交大邮箱预设或第三方 IMAP/SMTP；文件夹与未读计数；摘要优先同步、正文按需获取；附件；写信、回复、转发；本地草稿自动保存；本地回收站 |
 | 云盘 | 交大云盘 pan.sjtu.edu.cn（腾讯 coFile）：jAccount 单点登录、目录浏览、流式预览与下载、配额显示 |
 | 消息 | 交我办站内消息（my.sjtu.edu.cn /api/jwbmessage）：每 10 分钟同步未读，进入通知页并投递系统通知 |
@@ -22,7 +22,7 @@
 | 水源 | Discourse User API Key 授权；最新/精品/分类/标签/搜索；主题与楼层；回复、发主题、私信；点赞；收藏；通知；图片上传；用户主页（自己与他人）与徽章；secure uploads 图片本地代理 |
 | TODO | 本地待办 + Canvas 作业 DDL 聚合；完成状态；列表/月历；写入月历并双向联动；到期提醒 |
 | 全局搜索 | 课程资料、邮件、日程、TODO、水源、项目文件、设置项的本地搜索 |
-| 工作台 | 本地项目、文件树、标签页、CodeMirror 文本编辑、Markdown + KaTeX + mermaid、PDF/图片/DOCX/XLSX 预览、内置 ConPTY 终端（Git Bash 优先，PowerShell 兜底）、Git 分支显示与切换 |
+| 工作台 | 本地项目、文件树、标签页、CodeMirror 文本编辑、Markdown + KaTeX + mermaid、PDF/图片/DOCX/XLSX/PPTX/旧版 Office 预览与全屏阅读、内置 ConPTY 终端（Git Bash 优先，PowerShell 兜底）、Git 分支显示与切换 |
 | 设置 | 账户与连接、主题/字号（默认跟随系统，可按基准 70%–180% 调节）/缩放、开机自启、关闭行为（托盘/退出）、系统通知测试、通知、试验功能、导航入口、缓存、备份、手动检查更新、条款与隐私 |
 | 托盘 | 自研 Win32 通知区图标：左键恢复窗口、右键菜单「打开主界面 / 退出 SJTU Hive」，关闭按钮可按设置隐藏到托盘 |
 | 会话续期 | 校园 Cookie 失效时自动用 jAccount 单点登录静默续期（教学网两跳 SSO），续期失败才提示重新登录 |
@@ -77,7 +77,7 @@ go test ./... -count=1
 
 ## Android
 
-`android/` 是配套的 Android 应用（Kotlin + Jetpack Compose，minSdk 33），提供概览、日程、消息、云盘、课堂视频（自动横屏、玻璃控件、单/双画面）、水源与设置。
+`android/` 是配套的 Android 应用（Kotlin + Jetpack Compose，minSdk 33），提供概览、日程、消息、云盘、课堂视频（自动横屏、玻璃控件、单/双画面）、水源与设置。云盘与邮件附件支持内置预览：PDF、图片、文本、音视频、DOCX/XLSX，以及 PPTX 逐页渲染（含内嵌视频）和旧版 DOC/PPT/XLS 只读预览，均可全屏阅读。
 
 ```sh
 cd android
@@ -90,7 +90,8 @@ Release 中的 APK 为维护者本地正式签名；`android/keystore.properties
 
 - 交我办消息与云盘依赖 jAccount 会话：会话过期时应用会先静默续期，jAccount 本身过期后才需要重新登录；云盘 `user_token` 有效期 30 天，`access_token` 30 分钟自动续取。
 - 日程来自交我办日历，本地日程不写回学校系统。
-- 单标签组（无分屏）、固定快捷键（无自定义键位）、无静默自动更新；PPTX/旧版 Office 走系统 Office。
+- 单标签组（无分屏）、固定快捷键（无自定义键位）、无静默自动更新。
+- 旧版 Office 为只读轻量渲染，复杂排版、宏与嵌入对象可能丢失；PPTX 不播放切换动画与过渡效果，仅呈现静态页面。
 - 水源为 beta，接口可能随站点调整；邮箱一次配置一个账户。
 - 课堂视频「全量缓存」以本地下载实现；未做转码/合并；已开始传输的流中断后由播放器重试。
 - 自动更新只做「检查更新 + 打开下载地址」，不自动下载或安装。

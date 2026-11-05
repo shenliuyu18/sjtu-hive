@@ -398,7 +398,7 @@ private fun PptxSlidesPreview(file: File) {
     val document = remember(file, context) { runCatching { PptxDocument(file, context.cacheDir) }.getOrNull() }
     var playing by remember { mutableStateOf<File?>(null) }
     var preparing by remember { mutableStateOf(false) }
-    DisposableEffect(file) {
+    DisposableEffect(document) {
         onDispose { document?.close() }
     }
     BackHandler(enabled = playing != null) { playing = null }
@@ -619,6 +619,7 @@ private fun VideoPreview(file: File) {
                 }
             }
         },
+        onRelease = { view -> view.stopPlayback() },
         modifier = Modifier.fillMaxSize(),
     )
 }
@@ -647,6 +648,7 @@ private fun LegacyOfficePreview(file: File, kind: String) {
     DisposableEffect(token) {
         onDispose { LegacyFileStore.remove(token) }
     }
+    val url = "https://appassets.androidplatform.net/assets/legacy/viewer.html?kind=$kind&file=/user/$token"
     val loader = remember(context) {
         WebViewAssetLoader.Builder()
             .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(context))
@@ -678,8 +680,19 @@ private fun LegacyOfficePreview(file: File, kind: String) {
                         request: WebResourceRequest,
                     ): WebResourceResponse? = loader.shouldInterceptRequest(request.url)
                 }
-                loadUrl("https://appassets.androidplatform.net/assets/legacy/viewer.html?kind=$kind&file=/user/$token")
+                tag = url
+                loadUrl(url)
             }
+        },
+        update = { view ->
+            if (view.tag != url) {
+                view.tag = url
+                view.loadUrl(url)
+            }
+        },
+        onRelease = { view ->
+            view.loadUrl("about:blank")
+            view.destroy()
         },
         modifier = Modifier.fillMaxSize(),
     )
