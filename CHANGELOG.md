@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.1.1 — 2026-11-05
+
+### Android
+
+- Release 构建启用 R8 代码压缩与资源裁剪，APK 由约 57 MB 降至约 4 MB。
+- 移除未使用的 Coil 与 Miuix 图标依赖，保留 JavaMail、Miuix/Haze/Backdrop 等运行时依赖。
+- 新增 ProGuard keep 规则；每个版本的 `mapping.txt` 需随产物归档，用于还原混淆堆栈。
+
+### 桌面
+
+- 同步版本号，无功能变更。
+
 ## 1.1.0 — 2026-11-05
 
 ### 预览

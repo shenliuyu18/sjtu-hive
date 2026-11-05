@@ -84,7 +84,9 @@ cd android
 gradle :app:assembleDebug   # 或 :app:assembleRelease（需本地 keystore.properties）
 ```
 
-Release 中的 APK 为维护者本地正式签名；`android/keystore.properties` 与 `android/keystore/` 不入库。
+Release 中的 APK 为维护者本地正式签名；`android/keystore.properties` 与 `android/keystore/` 不入库。Release 构建默认启用 R8 与资源裁剪，规则见 `app/proguard-rules.pro`；每次发布需归档 `app/build/outputs/mapping/release/mapping.txt`。
+
+版本约定：正式发布使用稳定的 `x.y.z`；日常开发、联调和测试包统一使用 `x.y.z-beta.N`，不发布为正式版。
 
 ## 已知限制
 

@@ -18,8 +18,8 @@ android {
         applicationId = "com.sjtuhive.app"
         minSdk = 33
         targetSdk = 37
-        versionCode = 3
-        versionName = "1.1.0"
+        versionCode = 4
+        versionName = "1.1.1"
     }
 
     buildFeatures { compose = true }
@@ -37,8 +37,12 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
-            isShrinkResources = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
             if (keystoreFile.exists()) signingConfig = signingConfigs.getByName("release")
         }
     }
@@ -81,10 +85,7 @@ dependencies {
     implementation("top.yukonga.miuix.kmp:miuix-core:0.9.4")
     implementation("io.github.kyant0:backdrop:2.0.1")
     implementation("io.github.kyant0:capsule:2.1.3")
-    implementation("io.coil-kt.coil3:coil-compose:3.6.3")
-    implementation("io.coil-kt.coil3:coil-network-okhttp:3.6.3")
     implementation("top.yukonga.miuix.kmp:miuix-blur-android:0.9.4")
-    implementation("top.yukonga.miuix.kmp:miuix-icons-android:0.9.4")
     implementation("top.yukonga.miuix.kmp:miuix-ui-android:0.9.4")
     implementation("org.jetbrains:annotations:26.0.2")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
