@@ -1,4 +1,4 @@
-import { Download, LogOut, Search, Share2 } from 'lucide-react';
+import { Download, ExternalLink, LogOut, Search, Share2 } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { call } from '@/lib/bridge';
@@ -7,6 +7,8 @@ import { formatDate } from '@/lib/format';
 import { Badge, Card, EmptyState, PageHeader, Spinner } from '@/components/ui/Misc';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
+import { PreviewPane } from '@/components/content/PreviewPane';
+import type { DocumentContent } from '@/lib/models';
 
 type JsonObject = Record<string, unknown>;
 type ShareState = { loggedIn: boolean };
@@ -80,6 +82,24 @@ function downloadURL(value: unknown): string {
   return '';
 }
 
+function flag(value: unknown, ...keys: string[]): boolean {
+  if (!value || typeof value !== 'object') return false;
+  const record = value as JsonObject;
+  return keys.some((key) => record[key] === true);
+}
+
+function materialPoints(value: unknown): number {
+  return number(value, 'points') ?? 0;
+}
+
+function materialPurchased(value: unknown): boolean {
+  return flag(value, 'has_purchased', 'purchased') || flag(value, 'is_mine');
+}
+
+function fileNameOf(value: unknown): string {
+  return text(value, 'file_name', 'name', 'title') || '传承交大资料';
+}
+
 export function SharePage() {
   const [state, setState] = useState<ShareState | null>(null);
   const [loginBusy, setLoginBusy] = useState(false);
@@ -91,6 +111,20 @@ export function SharePage() {
   const [selectedMaterial, setSelectedMaterial] = useState<JsonObject | null>(null);
   const [loading, setLoading] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [actionBusy, setActionBusy] = useState(false);
+  const [preview, setPreview] = useState<DocumentContent | null>(null);
+
+  const handleError = useCallback((cause: unknown, fallback: string) => {
+    const message = cause instanceof Error ? cause.message : fallback;
+    if (message.includes('登录已失效')) {
+      setState({ loggedIn: false });
+      setCourses([]);
+      setMaterials([]);
+      setSelectedCourse(null);
+      setSelectedMaterial(null);
+    }
+    toast.error(message);
+  }, []);
 
   const loadBanners = useCallback(async () => {
     try {
@@ -147,7 +181,7 @@ export function SharePage() {
     try {
       setCourses(asArray(await call<unknown>('share.searchCourses', keyword.trim())));
     } catch (cause) {
-      toast.error(cause instanceof Error ? cause.message : '搜索课程失败');
+      handleError(cause, '搜索课程失败');
     } finally {
       setLoading(false);
     }
@@ -162,7 +196,7 @@ export function SharePage() {
     try {
       setMaterials(asArray(await call<unknown>('share.materials', id)));
     } catch (cause) {
-      toast.error(cause instanceof Error ? cause.message : '读取资料失败');
+      handleError(cause, '读取资料失败');
     } finally {
       setLoading(false);
     }
@@ -175,25 +209,82 @@ export function SharePage() {
     try {
       setSelectedMaterial(asArray(await call<unknown>('share.material', id))[0] ?? material);
     } catch (cause) {
-      toast.error(cause instanceof Error ? cause.message : '读取资料详情失败');
+      handleError(cause, '读取资料详情失败');
     } finally {
       setDetailLoading(false);
     }
   };
 
-  const download = async () => {
+  const downloadURLFor = async () => {
     const id = selectedMaterial ? idOf(selectedMaterial) : null;
-    if (id === null) return;
+    if (id === null) return '';
+    const result = await call<unknown>('share.download', id);
+    return downloadURL(result);
+  };
+
+  const purchase = async () => {
+    const id = selectedMaterial ? idOf(selectedMaterial) : null;
+    if (id === null || !selectedMaterial) return;
+    const points = materialPoints(selectedMaterial);
+    if (points > 0 && !window.confirm(`该资料需要 ${points} 积分兑换，确定继续吗？`)) return;
+    setActionBusy(true);
     try {
-      const result = await call<unknown>('share.download', id);
-      const url = downloadURL(result);
+      await call('share.purchase', id);
+      const updated = { ...selectedMaterial, has_purchased: true };
+      setSelectedMaterial(updated);
+      setMaterials((current) => current.map((item) => (idOf(item) === id ? updated : item)));
+      toast.success(points > 0 ? '兑换成功，可以打开或下载' : '已免费领取，可以打开或下载');
+    } catch (cause) {
+      handleError(cause, '领取资料失败');
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  const openMaterialFile = async () => {
+    const id = selectedMaterial ? idOf(selectedMaterial) : null;
+    if (id === null || !selectedMaterial) return;
+    setActionBusy(true);
+    try {
+      const doc = await call<DocumentContent>('share.preview', id, fileNameOf(selectedMaterial));
+      setPreview(doc);
+    } catch (cause) {
+      handleError(cause, '打开资料失败');
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  const openInBrowser = async () => {
+    try {
+      const url = await downloadURLFor();
       if (!url) {
-        toast.error('没有获取到下载链接');
+        toast.error('没有获取到文件地址');
         return;
       }
       await call('app.openExternal', url);
     } catch (cause) {
-      toast.error(cause instanceof Error ? cause.message : '下载失败');
+      handleError(cause, '打开资料失败');
+    }
+  };
+
+  const download = async () => {
+    const id = selectedMaterial ? idOf(selectedMaterial) : null;
+    if (id === null || !selectedMaterial) return;
+    setActionBusy(true);
+    try {
+      const result = await call<{ saved?: boolean; path?: string }>(
+        'share.save',
+        id,
+        fileNameOf(selectedMaterial),
+      );
+      if (result?.saved) {
+        toast.success(result.path ? `已保存到 ${result.path}` : '资料已保存');
+      }
+    } catch (cause) {
+      handleError(cause, '下载失败');
+    } finally {
+      setActionBusy(false);
     }
   };
 
@@ -225,7 +316,8 @@ export function SharePage() {
   }
 
   return (
-    <div className="flex h-full flex-col">
+    <>
+      <div className="flex h-full flex-col">
       <PageHeader
         eyebrow="SJTU SHARE"
         title="传承交大"
@@ -348,20 +440,61 @@ export function SharePage() {
               <div className="mt-3 whitespace-pre-wrap text-[0.7rem] leading-relaxed text-ink-2">
                 {text(selectedMaterial, 'description', 'content') || '暂无描述。'}
               </div>
-              <div className="mt-4 flex flex-wrap gap-2">
-                <Button size="sm" onClick={() => void download()}>
-                  <Download className="size-3.5" /> 下载 / 打开
-                </Button>
+              <div className="mt-4 flex flex-wrap items-center gap-2">
+                {materialPurchased(selectedMaterial) ? (
+                  <>
+                    <Button size="sm" variant="secondary" onClick={() => void openMaterialFile()} disabled={actionBusy}>
+                      <ExternalLink className="size-3.5" /> 打开
+                    </Button>
+                    <Button size="sm" onClick={() => void download()} disabled={actionBusy}>
+                      <Download className="size-3.5" /> 下载
+                    </Button>
+                  </>
+                ) : (
+                  <Button size="sm" onClick={() => void purchase()} disabled={actionBusy}>
+                    {actionBusy ? <Spinner /> : null}
+                    {materialPoints(selectedMaterial) > 0
+                      ? `${materialPoints(selectedMaterial)} 积分兑换`
+                      : '免费领取'}
+                  </Button>
+                )}
                 {number(selectedMaterial, 'points') !== null ? (
-                  <Badge variant="warning">{number(selectedMaterial, 'points')} 积分</Badge>
+                  <Badge variant="warning">
+                    {materialPurchased(selectedMaterial) ? '已领取 · ' : ''}
+                    {number(selectedMaterial, 'points')} 积分
+                  </Badge>
                 ) : null}
               </div>
+              {!materialPurchased(selectedMaterial) ? (
+                <p className="mt-2 text-[0.62rem] leading-relaxed text-ink-3">
+                  领取后即可打开或下载；0 积分资料免费领取。
+                </p>
+              ) : null}
             </>
           ) : (
             <EmptyState icon={Share2} title="选择一份资料" description="详情与下载入口会显示在这里。" />
           )}
         </div>
       </div>
-    </div>
+      </div>
+      {preview ? (
+        <div className="fixed inset-0 z-[80] flex flex-col bg-surface">
+          <div className="flex items-center justify-between gap-3 border-b border-line px-4 py-2">
+            <div className="min-w-0 truncate text-sm font-semibold text-ink">{preview.title}</div>
+            <div className="flex shrink-0 items-center gap-2">
+              <Button size="sm" variant="ghost" onClick={() => void openInBrowser()}>
+                <ExternalLink className="size-3.5" /> 在浏览器打开
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setPreview(null)}>
+                关闭
+              </Button>
+            </div>
+          </div>
+          <div className="min-h-0 flex-1">
+            <PreviewPane doc={preview} />
+          </div>
+        </div>
+      ) : null}
+    </>
   );
 }

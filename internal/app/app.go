@@ -258,6 +258,61 @@ func (a *App) registerServices() {
 	a.course.Register(a.router)
 	a.share = NewShare(a.secrets)
 	a.share.Register(a.router)
+	a.router.Handle("share.save", func(args []json.RawMessage) (any, error) {
+		id, err := DecodeArg[int64](args, 0)
+		if err != nil {
+			return nil, err
+		}
+		name, _, _ := DecodeOptionalArg[string](args, 1)
+		name = sanitizeFilename(name, fmt.Sprintf("传承交大资料-%d", id))
+		options := wruntime.SaveDialogOptions{
+			Title:            "下载传承交大资料",
+			DefaultFilename:  name,
+			DefaultDirectory: a.paths.DownloadsDir,
+		}
+		if ext := strings.ToLower(filepath.Ext(name)); ext != "" {
+			options.Filters = []wruntime.FileFilter{{
+				DisplayName: strings.ToUpper(strings.TrimPrefix(ext, ".")) + " 文件 (*" + ext + ")",
+				Pattern:     "*" + ext,
+			}}
+		}
+		target, err := wruntime.SaveFileDialog(a.ctx, options)
+		if err != nil {
+			return nil, err
+		}
+		if target == "" {
+			return map[string]any{"saved": false}, nil
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		if err := a.share.SaveTo(ctx, id, target); err != nil {
+			return nil, err
+		}
+		return map[string]any{"saved": true, "path": target}, nil
+	})
+	a.router.Handle("share.preview", func(args []json.RawMessage) (any, error) {
+		id, err := DecodeArg[int64](args, 0)
+		if err != nil {
+			return nil, err
+		}
+		name, _, _ := DecodeOptionalArg[string](args, 1)
+		name = sanitizeFilename(name, fmt.Sprintf("传承交大资料-%d", id))
+		dir := filepath.Join(a.paths.CacheDir, "share")
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return nil, err
+		}
+		target := filepath.Join(dir, fmt.Sprintf("%d-%s", id, name))
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		if err := a.share.SaveTo(ctx, id, target); err != nil {
+			return nil, err
+		}
+		info, err := os.Stat(target)
+		if err != nil {
+			return nil, err
+		}
+		return documentFromLocalFile(a.media, target, name, "", info.Size())
+	})
 	a.exams = NewExams(a.db, a.campus, a.notifications, a.logger, a.emit)
 	a.exams.Register(a.router)
 	a.notifications.Register(a.router)

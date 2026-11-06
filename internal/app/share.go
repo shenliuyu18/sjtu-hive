@@ -8,15 +8,16 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 )
 
-const (
-	shareAPIBase = "https://api-v2.share.dyweb.sjtu.cn"
-	shareSecret  = "share-token"
-)
+var shareAPIBase = "https://api-v2.share.dyweb.sjtu.cn"
+
+const shareSecret = "share-token"
 
 var errShareAuth = errors.New("传承交大登录已失效，请重新登录")
 
@@ -72,6 +73,26 @@ func (s *Share) Logout() shareState {
 	return shareState{LoggedIn: false}
 }
 
+// clearToken only removes the token used by the failed request, so a late 401
+// from an old request cannot wipe a newer login.
+func (s *Share) clearToken(used string) {
+	s.mu.Lock()
+	if s.token == used {
+		s.token = ""
+		_ = s.secrets.Delete(shareSecret)
+	}
+	s.mu.Unlock()
+}
+
+func shareErrorMessage(message string) string {
+	switch strings.TrimSpace(message) {
+	case "you have not purchase the material!":
+		return "该资料需要先兑换或领取后才能下载"
+	default:
+		return strings.TrimSpace(message)
+	}
+}
+
 func (s *Share) api(ctx context.Context, method, path string, body any) (json.RawMessage, error) {
 	s.mu.Lock()
 	token := s.token
@@ -100,11 +121,8 @@ func (s *Share) api(ctx context.Context, method, path string, body any) (json.Ra
 	}
 	data, _ := io.ReadAll(io.LimitReader(response.Body, 8<<20))
 	_ = response.Body.Close()
-	if response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden {
-		s.mu.Lock()
-		s.token = ""
-		_ = s.secrets.Delete(shareSecret)
-		s.mu.Unlock()
+	if response.StatusCode == http.StatusUnauthorized {
+		s.clearToken(token)
 		return nil, errShareAuth
 	}
 	var envelope struct {
@@ -119,11 +137,12 @@ func (s *Share) api(ctx context.Context, method, path string, body any) (json.Ra
 		return data, nil
 	}
 	if !envelope.Success {
-		if response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden {
+		if response.StatusCode == http.StatusUnauthorized {
+			s.clearToken(token)
 			return nil, errShareAuth
 		}
-		if strings.TrimSpace(envelope.Message) != "" {
-			return nil, errors.New(envelope.Message)
+		if message := shareErrorMessage(envelope.Message); message != "" {
+			return nil, errors.New(message)
 		}
 		return nil, fmt.Errorf("传承交大返回 HTTP %d", response.StatusCode)
 	}
@@ -169,6 +188,65 @@ func (s *Share) Material(ctx context.Context, id int64) (json.RawMessage, error)
 
 func (s *Share) Download(ctx context.Context, id int64) (json.RawMessage, error) {
 	return s.api(ctx, http.MethodGet, fmt.Sprintf("/api/v1/material/download/%d", id), nil)
+}
+
+func (s *Share) Purchase(ctx context.Context, id int64) (json.RawMessage, error) {
+	return s.api(ctx, http.MethodGet, fmt.Sprintf("/api/v1/material/purchase/%d", id), nil)
+}
+
+func shareDownloadURL(data json.RawMessage) string {
+	var direct string
+	if json.Unmarshal(data, &direct) == nil && strings.TrimSpace(direct) != "" {
+		return strings.TrimSpace(direct)
+	}
+	var payload map[string]any
+	if json.Unmarshal(data, &payload) != nil {
+		return ""
+	}
+	for _, key := range []string{"url", "download_url", "link", "file_url"} {
+		if value, ok := payload[key].(string); ok && strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
+// SaveTo streams the material behind the signed download URL into target.
+func (s *Share) SaveTo(ctx context.Context, id int64, target string) error {
+	data, err := s.Download(ctx, id)
+	if err != nil {
+		return err
+	}
+	link := shareDownloadURL(data)
+	if link == "" {
+		return errors.New("没有获取到下载链接")
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, link, nil)
+	if err != nil {
+		return err
+	}
+	response, err := (&http.Client{Timeout: 5 * time.Minute}).Do(request)
+	if err != nil {
+		return fmt.Errorf("下载资料失败：%w", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return fmt.Errorf("下载资料失败：HTTP %d", response.StatusCode)
+	}
+	temp, err := os.CreateTemp(filepath.Dir(target), ".share-*.part")
+	if err != nil {
+		return err
+	}
+	tempName := temp.Name()
+	defer os.Remove(tempName)
+	if _, err := io.Copy(temp, response.Body); err != nil {
+		_ = temp.Close()
+		return err
+	}
+	if err := temp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tempName, target)
 }
 
 func (s *Share) Register(router *Router) {
@@ -223,5 +301,14 @@ func (s *Share) Register(router *Router) {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		return s.Download(ctx, id)
+	})
+	router.Handle("share.purchase", func(args []json.RawMessage) (any, error) {
+		id, err := DecodeArg[int64](args, 0)
+		if err != nil {
+			return nil, err
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		return s.Purchase(ctx, id)
 	})
 }

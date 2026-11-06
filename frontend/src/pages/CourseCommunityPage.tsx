@@ -224,7 +224,9 @@ export function CourseCommunityPage() {
   const [filters, setFilters] = useState<CourseFilters | null>(null);
   const [homeReviews, setHomeReviews] = useState<ReviewList | null>(null);
   const [followed, setFollowed] = useState<CourseSummary[]>([]);
-  const [searchMode, setSearchMode] = useState(false);
+  const [mode, setMode] = useState<'home' | 'search' | 'mine'>('home');
+  const [mine, setMine] = useState<CourseList | null>(null);
+  const [mineLoading, setMineLoading] = useState(false);
   const [list, setList] = useState<CourseList | null>(null);
   const [query, setQuery] = useState('');
   const [department, setDepartment] = useState('');
@@ -243,6 +245,17 @@ export function CourseCommunityPage() {
     ]);
     if (reviewResult.status === 'fulfilled') setHomeReviews(reviewResult.value);
     if (followedResult.status === 'fulfilled') setFollowed(followedResult.value?.items ?? []);
+  }, []);
+
+  const loadMine = useCallback(async (nextPage = 1) => {
+    setMineLoading(true);
+    try {
+      setMine(await call<CourseList>('course.followed', nextPage, 20));
+    } catch (cause) {
+      toast.error(cause instanceof Error ? cause.message : '读取我的课程失败');
+    } finally {
+      setMineLoading(false);
+    }
   }, []);
 
   const loadBase = useCallback(async () => {
@@ -336,7 +349,7 @@ export function CourseCommunityPage() {
       setDetail(null);
       setReviews(null);
       setSelectedId(null);
-      setSearchMode(false);
+      setMode('home');
       toast.success('已退出选课社区');
     } catch (cause) {
       toast.error(cause instanceof Error ? cause.message : '退出失败');
@@ -344,15 +357,25 @@ export function CourseCommunityPage() {
   };
 
   const goHome = () => {
-    setSearchMode(false);
+    setMode('home');
     setQuery('');
     setDepartment('');
     setSemester('');
     setList(null);
+    setMine(null);
     setDetail(null);
     setSelectedId(null);
     setReviews(null);
     void loadHome();
+  };
+
+  const openMine = () => {
+    setMode('mine');
+    setList(null);
+    setDetail(null);
+    setSelectedId(null);
+    setReviews(null);
+    void loadMine(1);
   };
 
   const departments = useMemo(() => filters?.departments ?? [], [filters]);
@@ -424,7 +447,7 @@ export function CourseCommunityPage() {
                 onChange={(event) => setQuery(event.target.value)}
                 onKeyDown={(event) => {
                   if (event.key === 'Enter') {
-                    setSearchMode(true);
+                    setMode('search');
                     void loadList(1);
                   }
                 }}
@@ -459,13 +482,13 @@ export function CourseCommunityPage() {
                 size="sm"
                 variant="secondary"
                 onClick={() => {
-                  setSearchMode(true);
+                  setMode('search');
                   void loadList(1);
                 }}
               >
                 <Search className="size-3.5" /> 搜索
               </Button>
-              {searchMode ? (
+              {mode !== 'home' ? (
                 <Button size="sm" variant="ghost" onClick={goHome}>
                   返回首页
                 </Button>
@@ -474,7 +497,7 @@ export function CourseCommunityPage() {
           </Card>
 
           <div className="scroll-thin min-h-0 flex-1 overflow-y-auto pr-1">
-            {searchMode ? (
+            {mode === 'search' ? (
               loading ? (
                 <div className="flex h-32 items-center justify-center gap-2 text-xs text-ink-3">
                   <Spinner /> 正在读取课程…
@@ -509,6 +532,53 @@ export function CourseCommunityPage() {
               ) : (
                 <EmptyState icon={BookOpen} title="没有找到课程" description="换一个关键词或筛选条件试试。" />
               )
+            ) : mode === 'mine' ? (
+              mineLoading && !mine ? (
+                <div className="flex h-32 items-center justify-center gap-2 text-xs text-ink-3">
+                  <Spinner /> 正在读取我的课程…
+                </div>
+              ) : mine?.items?.length ? (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="text-sm font-semibold text-ink">我的课程</div>
+                    <span className="text-[0.64rem] text-ink-3">
+                      共 {mine.total} 门 · 第 {mine.page} 页
+                    </span>
+                  </div>
+                  {mine.items.map((course) => (
+                    <CourseCard
+                      key={course.id}
+                      course={course}
+                      active={selectedId === course.id}
+                      onClick={() => void openCourse(course)}
+                    />
+                  ))}
+                  <div className="mt-3 flex items-center justify-end gap-2 text-[0.66rem] text-ink-3">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={mineLoading || mine.page <= 1}
+                      onClick={() => void loadMine(mine.page - 1)}
+                    >
+                      上一页
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={mineLoading || mine.page * mine.page_size >= mine.total}
+                      onClick={() => void loadMine(mine.page + 1)}
+                    >
+                      下一页
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <EmptyState
+                  icon={BookOpen}
+                  title="还没有我的课程"
+                  description="在 course.sjtu.plus 关注课程后，会显示在这里。"
+                />
+              )
             ) : homeLoading ? (
               <div className="flex h-32 items-center justify-center gap-2 text-xs text-ink-3">
                 <Spinner /> 正在读取最新点评…
@@ -542,7 +612,7 @@ export function CourseCommunityPage() {
             <CourseDetailPanel detail={detail ?? ({} as CourseDetail)} reviews={reviews} loading />
           ) : detail ? (
             <CourseDetailPanel detail={detail} reviews={reviews} loading={false} />
-          ) : searchMode ? (
+          ) : mode !== 'home' ? (
             <EmptyState icon={BookOpen} title="选择一门课程" description="点击左侧课程查看评分与评价。" />
           ) : (
             <div className="space-y-4">
@@ -563,8 +633,20 @@ export function CourseCommunityPage() {
               </div>
               <div className="border-t border-line pt-3">
                 <div className="mb-2 flex items-center justify-between">
-                  <div className="text-sm font-semibold text-ink">已关注课程</div>
-                  <span className="text-[0.62rem] text-ink-3">{followed.length}</span>
+                  <button
+                    type="button"
+                    onClick={openMine}
+                    className="text-sm font-semibold text-ink transition-colors hover:text-accent"
+                  >
+                    我的课程
+                  </button>
+                  <button
+                    type="button"
+                    onClick={openMine}
+                    className="text-[0.62rem] text-ink-3 transition-colors hover:text-ink"
+                  >
+                    查看更多
+                  </button>
                 </div>
                 <div className="space-y-2">
                   {followed.length ? (
@@ -572,7 +654,7 @@ export function CourseCommunityPage() {
                       <CompactCourse key={course.id} course={course} onClick={() => void openCourse(course)} />
                     ))
                   ) : (
-                    <div className="text-[0.66rem] text-ink-3">暂无关注课程。</div>
+                    <div className="text-[0.66rem] text-ink-3">暂无我的课程。</div>
                   )}
                 </div>
               </div>

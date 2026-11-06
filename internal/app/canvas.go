@@ -1244,6 +1244,10 @@ func itemFileID(item CanvasItem) int64 {
 }
 
 func (c *Canvas) documentFromFile(pathValue, name, contentType string, size int64, courseID, fileID int64) (DocumentContent, error) {
+	return documentFromLocalFile(c.media, pathValue, name, contentType, size)
+}
+
+func documentFromLocalFile(media *MediaServer, pathValue, name, contentType string, size int64) (DocumentContent, error) {
 	ext := strings.TrimPrefix(strings.ToLower(filepath.Ext(name)), ".")
 	content := DocumentContent{
 		Path: pathValue, Title: name, Size: size, ReadOnly: true,
@@ -1254,7 +1258,7 @@ func (c *Canvas) documentFromFile(pathValue, name, contentType string, size int6
 	}
 	if known, ok := binaryExtensions[ext]; ok {
 		content.Format = formatOf(pathValue, ext, false)
-		content.ResourceURL, _ = c.media.AddFile(pathValue, name, firstNonEmpty(contentType, known), time.Hour)
+		content.ResourceURL, _ = media.AddFile(pathValue, name, firstNonEmpty(contentType, known), time.Hour)
 		return content, nil
 	}
 	data, err := os.ReadFile(pathValue)
@@ -1263,7 +1267,7 @@ func (c *Canvas) documentFromFile(pathValue, name, contentType string, size int6
 	}
 	if looksBinary(data) {
 		content.Format = "binary"
-		content.ResourceURL, _ = c.media.AddFile(pathValue, name, "application/octet-stream", time.Hour)
+		content.ResourceURL, _ = media.AddFile(pathValue, name, "application/octet-stream", time.Hour)
 		content.Message = "二进制文件，可用系统默认应用打开"
 		return content, nil
 	}
