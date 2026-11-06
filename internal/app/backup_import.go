@@ -15,22 +15,26 @@ import (
 	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-func (a *App) ChooseBackup() (string, error) {
-	target, err := wruntime.OpenFileDialog(a.ctx, wruntime.OpenDialogOptions{
+func (a *App) ChooseBackup(encrypted bool) (string, error) {
+	options := wruntime.OpenDialogOptions{
 		Title:            "选择 SJTU Hive 备份",
 		DefaultDirectory: a.paths.DownloadsDir,
-		Filters: []wruntime.FileFilter{
-			{DisplayName: "SJTU Hive 备份 (*.zip, *.hivebackup)", Pattern: "*.zip;*.hivebackup"},
-		},
-	})
-	return target, err
+	}
+	if encrypted {
+		options.Title = "选择加密备份"
+		options.Filters = []wruntime.FileFilter{{DisplayName: "加密备份 (*.hivebackup)", Pattern: "*.hivebackup"}}
+	} else {
+		options.Title = "选择本地数据备份"
+		options.Filters = []wruntime.FileFilter{{DisplayName: "数据备份 (*.zip)", Pattern: "*.zip"}}
+	}
+	return wruntime.OpenFileDialog(a.ctx, options)
 }
 
-func (a *App) ImportBackup(sourcePath, passphrase string) (map[string]any, error) {
-	return a.importBackupFile(sourcePath, passphrase)
+func (a *App) ImportBackup(sourcePath, passphrase string, encrypted bool) (map[string]any, error) {
+	return a.importBackupFile(sourcePath, passphrase, encrypted)
 }
 
-func (a *App) importBackupFile(sourcePath, passphrase string) (map[string]any, error) {
+func (a *App) importBackupFile(sourcePath, passphrase string, expectEncrypted bool) (map[string]any, error) {
 	sourcePath = strings.TrimSpace(sourcePath)
 	if sourcePath == "" {
 		return nil, errors.New("未选择备份文件")
@@ -39,6 +43,13 @@ func (a *App) importBackupFile(sourcePath, passphrase string) (map[string]any, e
 	if err != nil || info.IsDir() {
 		return nil, errors.New("备份文件不存在")
 	}
+	isEncrypted := encryptedBackup(sourcePath)
+	if isEncrypted && !expectEncrypted {
+		return nil, errors.New("该文件已加密，请使用「导入加密备份」并输入口令")
+	}
+	if !isEncrypted && expectEncrypted {
+		return nil, errors.New("所选文件不是加密备份（*.hivebackup）")
+	}
 	dir, err := os.MkdirTemp("", "sjtu-import-*")
 	if err != nil {
 		return nil, err
@@ -46,10 +57,10 @@ func (a *App) importBackupFile(sourcePath, passphrase string) (map[string]any, e
 	defer os.RemoveAll(dir)
 
 	plain := sourcePath
-	if encryptedBackup(sourcePath) {
+	if expectEncrypted {
 		passphrase = strings.TrimSpace(passphrase)
 		if len([]rune(passphrase)) < 8 {
-			return nil, errors.New("该备份已加密，请先输入加密口令（至少 8 个字符）")
+			return nil, errors.New("请先输入该备份的加密口令（至少 8 个字符）")
 		}
 		plain = filepath.Join(dir, "backup.zip")
 		if err := decryptBackupFile(sourcePath, plain, passphrase); err != nil {

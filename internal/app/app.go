@@ -327,8 +327,9 @@ func (a *App) registerServices() {
 		passphrase, _, _ := DecodeOptionalArg[string](args, 0)
 		return a.ExportBackupEncrypted(passphrase)
 	})
-	a.router.Handle("app.chooseBackup", func([]json.RawMessage) (any, error) {
-		return a.ChooseBackup()
+	a.router.Handle("app.chooseBackup", func(args []json.RawMessage) (any, error) {
+		encrypted, _, _ := DecodeOptionalArg[bool](args, 0)
+		return a.ChooseBackup(encrypted)
 	})
 	a.router.Handle("app.importBackup", func(args []json.RawMessage) (any, error) {
 		source, err := DecodeArg[string](args, 0)
@@ -336,7 +337,8 @@ func (a *App) registerServices() {
 			return nil, err
 		}
 		passphrase, _, _ := DecodeOptionalArg[string](args, 1)
-		return a.ImportBackup(source, passphrase)
+		encrypted, _, _ := DecodeOptionalArg[bool](args, 2)
+		return a.ImportBackup(source, passphrase, encrypted)
 	})
 	a.router.Handle("app.restart", func([]json.RawMessage) (any, error) {
 		a.restartRequested.Store(true)

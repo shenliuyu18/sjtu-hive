@@ -88,7 +88,7 @@ func TestImportBackupRestoresDatabaseAndSecrets(t *testing.T) {
 	}
 
 	app := &App{db: dest, settings: destSettings, secrets: secrets, paths: Paths{}}
-	summary, err := app.importBackupFile(archive, "")
+	summary, err := app.importBackupFile(archive, "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,13 +150,19 @@ func TestImportEncryptedBackupRequiresPassphrase(t *testing.T) {
 		t.Fatal(err)
 	}
 	restoreApp := &App{db: dest, settings: destSettings, secrets: destSecrets, paths: Paths{}}
-	if _, err := restoreApp.importBackupFile(encrypted, ""); err == nil {
+	if _, err := restoreApp.importBackupFile(encrypted, "", false); err == nil {
+		t.Fatal("encrypted archive must be rejected by the plain import entry")
+	}
+	if _, err := restoreApp.importBackupFile(plain, "", true); err == nil {
+		t.Fatal("plain archive must be rejected by the encrypted import entry")
+	}
+	if _, err := restoreApp.importBackupFile(encrypted, "", true); err == nil {
 		t.Fatal("expected an error without a passphrase")
 	}
-	if _, err := restoreApp.importBackupFile(encrypted, "wrong-password"); err == nil {
+	if _, err := restoreApp.importBackupFile(encrypted, "wrong-password", true); err == nil {
 		t.Fatal("expected an error for a wrong passphrase")
 	}
-	if _, err := restoreApp.importBackupFile(encrypted, "testpass123"); err != nil {
+	if _, err := restoreApp.importBackupFile(encrypted, "testpass123", true); err != nil {
 		t.Fatal(err)
 	}
 }

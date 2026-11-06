@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -18,9 +19,14 @@ import (
 
 const (
 	videoHome    = "https://v.sjtu.edu.cn/jy-application-resourcemanage-ui/"
-	videoAPIBase = "https://v.sjtu.edu.cn/jy-application-resourcemanage/v1"
-	videoME      = "https://v.sjtu.edu.cn/jy-application-resourcemanage/authority/me"
+	videoBase    = "https://v.sjtu.edu.cn/jy-application-resourcemanage"
+	videoAPIBase = videoBase + "/v1"
+	videoME      = videoBase + "/authority/me"
+	videoToken   = videoBase + "/oauth2/token"
+	videoLogin   = "https://v.sjtu.edu.cn/jy-application-resourcemanage-ui/?type=cas"
 )
+
+const campusUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36 Edg/155.0.0.0"
 
 var ErrClassroomAuth = errors.New("交大视频登录已失效，请重新登录")
 
@@ -83,6 +89,10 @@ type Classroom struct {
 	streams     map[int64]classroomStreamEntry
 	transcripts map[int64]classroomTranscriptEntry
 
+	tokenMu    sync.Mutex
+	jwt        string
+	refreshing bool
+
 	downloadMu sync.Mutex
 	downloads  map[string]*classroomDownloadTask
 }
@@ -104,29 +114,178 @@ type videoEnvelope struct {
 	Data   json.RawMessage `json:"data"`
 }
 
-func (c *Classroom) request(ctx context.Context, path string) ([]byte, error) {
-	headers := map[string]string{
+func (c *Classroom) token() string {
+	c.tokenMu.Lock()
+	defer c.tokenMu.Unlock()
+	return c.jwt
+}
+
+func (c *Classroom) setToken(token string) {
+	c.tokenMu.Lock()
+	c.jwt = token
+	c.tokenMu.Unlock()
+}
+
+func (c *Classroom) headers(extra map[string]string) map[string]string {
+	headers := make(map[string]string, len(extra)+1)
+	for key, value := range extra {
+		headers[key] = value
+	}
+	if token := c.token(); token != "" {
+		headers["jwt-token"] = token
+	}
+	return headers
+}
+
+func (c *Classroom) requestOnce(ctx context.Context, path string) ([]byte, error) {
+	headers := c.headers(map[string]string{
 		"Accept":  "application/json",
 		"Referer": videoHome,
 		"Origin":  "https://v.sjtu.edu.cn",
+	})
+	data, err := c.campus.Request(ctx, http.MethodGet, videoAPIBase+path, headers, "")
+	if errors.Is(err, ErrCampusAuth) {
+		return nil, ErrClassroomAuth
 	}
-	var lastErr error
-	for attempt := 0; attempt < 2; attempt++ {
-		data, err := c.campus.Request(ctx, http.MethodGet, videoAPIBase+path, headers, "")
-		if err == nil {
+	return data, err
+}
+
+func (c *Classroom) request(ctx context.Context, path string) ([]byte, error) {
+	data, err := c.requestOnce(ctx, path)
+	if err == nil {
+		return data, nil
+	}
+	if errors.Is(err, ErrCampusTransient) {
+		time.Sleep(250 * time.Millisecond)
+		if data, retryErr := c.requestOnce(ctx, path); retryErr == nil {
 			return data, nil
+		} else {
+			err = retryErr
 		}
-		if errors.Is(err, ErrCampusAuth) {
-			return nil, ErrClassroomAuth
+	}
+	if !errors.Is(err, ErrClassroomAuth) {
+		return nil, err
+	}
+	// The site's own JWT expired: exchange a fresh one through jAccount SSO.
+	if loginErr := c.loginVideo(ctx); loginErr != nil {
+		return nil, ErrClassroomAuth
+	}
+	return c.requestOnce(ctx, path)
+}
+
+// loginVideo completes the site's CAS/OAuth exchange with the campus jAccount
+// cookies and stores the JWT that the classroom API expects.
+func (c *Classroom) loginVideo(ctx context.Context) error {
+	c.tokenMu.Lock()
+	if c.refreshing {
+		c.tokenMu.Unlock()
+		return ErrClassroomAuth
+	}
+	c.refreshing = true
+	c.tokenMu.Unlock()
+	defer func() {
+		c.tokenMu.Lock()
+		c.refreshing = false
+		c.tokenMu.Unlock()
+	}()
+	if !c.campus.Connected() {
+		return ErrClassroomAuth
+	}
+	detail := ""
+	for attempt := 0; attempt < 2; attempt++ {
+		if attempt > 0 {
+			time.Sleep(400 * time.Millisecond)
 		}
-		lastErr = err
-		if errors.Is(err, ErrCampusTransient) && attempt == 0 {
-			time.Sleep(250 * time.Millisecond)
+		blocked, note := c.bootstrapVideoSession(ctx)
+		if blocked {
+			detail = note
 			continue
 		}
-		break
+		token, err := c.exchangeVideoToken(ctx)
+		if err == nil {
+			c.setToken(token)
+			return nil
+		}
+		detail = note + " token: " + err.Error()
 	}
-	return nil, lastErr
+	c.logVideoLogin("login failed", detail)
+	return ErrClassroomAuth
+}
+
+// bootstrapVideoSession follows the site's authorize redirects so the server
+// issues a session cookie. The first pass can trip a redirect loop before that
+// cookie lands, so callers retry once instead of failing outright.
+func (c *Classroom) bootstrapVideoSession(ctx context.Context) (bool, string) {
+	authorize := videoBase + "/oauth2/authorize?json=0&returnUri=" + url.QueryEscape(videoLogin)
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, authorize, nil)
+	if err != nil {
+		return true, "authorize request: " + err.Error()
+	}
+	request.Header.Set("User-Agent", campusUserAgent)
+	request.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+	var chain []string
+	client := &http.Client{
+		Jar: c.campus,
+		CheckRedirect: func(next *http.Request, via []*http.Request) error {
+			chain = append(chain, next.URL.Host+next.URL.Path)
+			if len(via) >= 20 {
+				return errors.New("redirect loop")
+			}
+			return nil
+		},
+	}
+	response, err := client.Do(request)
+	if err != nil {
+		return false, err.Error() + " chain=" + strings.Join(chain, " -> ")
+	}
+	_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 1<<20))
+	finalURL := response.Request.URL
+	_ = response.Body.Close()
+	if strings.Contains(finalURL.Hostname(), "jaccount.sjtu.edu.cn") {
+		return true, "jAccount page: " + finalURL.Host + finalURL.Path
+	}
+	return false, ""
+}
+
+func (c *Classroom) exchangeVideoToken(ctx context.Context) (string, error) {
+	status, data, err := c.campus.RequestRaw(ctx, http.MethodGet, videoToken, map[string]string{
+		"Accept":  "application/json",
+		"Referer": videoHome,
+	}, "")
+	if err != nil {
+		return "", err
+	}
+	if status != http.StatusOK {
+		return "", fmt.Errorf("HTTP %d", status)
+	}
+	var payload struct {
+		Code   json.RawMessage `json:"code"`
+		JWT    string          `json:"jwt_token"`
+		Result struct {
+			JWT string `json:"jwt_token"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil {
+		return "", err
+	}
+	token := payload.JWT
+	if token == "" {
+		token = payload.Result.JWT
+	}
+	if token == "" {
+		detail := strings.TrimSpace(string(data))
+		if len(detail) > 200 {
+			detail = detail[:200]
+		}
+		return "", fmt.Errorf("token missing: %s", detail)
+	}
+	return token, nil
+}
+
+func (c *Classroom) logVideoLogin(message, detail string) {
+	if c.campus != nil && c.campus.logger != nil {
+		c.campus.logger.Warn("classroom video login", "message", message, "detail", detail)
+	}
 }
 
 func unwrapVideo(data []byte) (json.RawMessage, error) {
@@ -161,10 +320,20 @@ func unwrapVideo(data []byte) (json.RawMessage, error) {
 }
 
 func (c *Classroom) checkLogin(ctx context.Context) error {
-	status, data, err := c.campus.RequestRaw(ctx, http.MethodGet, videoME, map[string]string{
+	if err := c.checkLoginOnce(ctx); err == nil {
+		return nil
+	}
+	if err := c.loginVideo(ctx); err != nil {
+		return err
+	}
+	return c.checkLoginOnce(ctx)
+}
+
+func (c *Classroom) checkLoginOnce(ctx context.Context) error {
+	status, data, err := c.campus.RequestRaw(ctx, http.MethodGet, videoME, c.headers(map[string]string{
 		"Accept":  "application/json",
 		"Referer": videoHome,
-	}, "")
+	}), "")
 	if err != nil || status != http.StatusOK {
 		return ErrClassroomAuth
 	}

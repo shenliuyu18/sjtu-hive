@@ -43,7 +43,10 @@ type SectionId = 'accounts' | 'appearance' | 'general' | 'storage' | 'about';
 
 type WebdavBackup = { name: string; size: number; modifiedAt: string };
 
-type PendingImport = { kind: 'local'; path: string } | { kind: 'webdav'; name: string };
+type PendingImport =
+  | { kind: 'zip'; path: string }
+  | { kind: 'encrypted'; path: string }
+  | { kind: 'webdav'; name: string };
 
 const sections: { id: SectionId; label: string; icon: LucideIcon }[] = [
   { id: 'accounts', label: '账户与连接', icon: Users },
@@ -182,6 +185,7 @@ export function Settings() {
   const [restorePassphrase, setRestorePassphrase] = useState('');
   const [webdavBackups, setWebdavBackups] = useState<WebdavBackup[]>([]);
   const [webdavListBusy, setWebdavListBusy] = useState(false);
+  const [webdavListError, setWebdavListError] = useState<string | null>(null);
   const [pendingImport, setPendingImport] = useState<PendingImport | null>(null);
   const [importing, setImporting] = useState(false);
   const [restoredName, setRestoredName] = useState<string | null>(null);
@@ -227,10 +231,16 @@ export function Settings() {
     setWebdavListBusy(true);
     call<WebdavBackup[]>('backup.webdav.list')
       .then((items) => {
-        if (active) setWebdavBackups(items);
+        if (active) {
+          setWebdavBackups(items);
+          setWebdavListError(null);
+        }
       })
-      .catch(() => {
-        if (active) setWebdavBackups([]);
+      .catch((error) => {
+        if (active) {
+          setWebdavBackups([]);
+          setWebdavListError(error instanceof Error ? error.message : '读取 WebDAV 备份列表失败');
+        }
       })
       .finally(() => {
         if (active) setWebdavListBusy(false);
@@ -317,10 +327,10 @@ export function Settings() {
     }
   };
 
-  const pickLocalBackup = async () => {
+  const pickLocalBackup = async (encrypted: boolean) => {
     try {
-      const path = await call<string>('app.chooseBackup');
-      if (path) setPendingImport({ kind: 'local', path });
+      const path = await call<string>('app.chooseBackup', encrypted);
+      if (path) setPendingImport(encrypted ? { kind: 'encrypted', path } : { kind: 'zip', path });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '无法选择备份文件');
     }
@@ -328,10 +338,12 @@ export function Settings() {
 
   const loadWebdavBackups = async () => {
     setWebdavListBusy(true);
+    setWebdavListError(null);
     try {
       setWebdavBackups(await call<WebdavBackup[]>('backup.webdav.list'));
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : '读取 WebDAV 备份列表失败');
+      setWebdavBackups([]);
+      setWebdavListError(error instanceof Error ? error.message : '读取 WebDAV 备份列表失败');
     } finally {
       setWebdavListBusy(false);
     }
@@ -344,8 +356,8 @@ export function Settings() {
       toast.error('请输入 WebDAV 备份的加密口令（至少 8 个字符）');
       return;
     }
-    if (target.kind === 'local' && /\.hivebackup$/i.test(target.path) && [...localPassphrase].length < 8) {
-      toast.error('该备份已加密，请在「加密口令」中填写导出时设置的口令');
+    if (target.kind === 'encrypted' && [...localPassphrase].length < 8) {
+      toast.error('请输入该加密备份的口令（至少 8 个字符）');
       return;
     }
     setImporting(true);
@@ -353,13 +365,17 @@ export function Settings() {
       const summary =
         target.kind === 'webdav'
           ? await call<{ name: string }>('backup.webdav.restore', target.name, restorePassphrase)
-          : await call<{ name: string }>('app.importBackup', target.path, localPassphrase);
+          : await call<{ name: string }>(
+              'app.importBackup',
+              target.path,
+              target.kind === 'encrypted' ? localPassphrase : '',
+              target.kind === 'encrypted',
+            );
       setPendingImport(null);
       setRestoredName(summary?.name ?? (target.kind === 'webdav' ? target.name : '本地备份'));
       setLocalPassphrase('');
       setRestorePassphrase('');
       refreshAccounts();
-      if (webdav?.configured) void loadWebdavBackups();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '导入失败');
     } finally {
@@ -936,11 +952,21 @@ export function Settings() {
                       </Button>
                     }
                   />
-                  <div className="p-4">
-                    <div className="text-xs font-medium text-ink">加密备份与导入</div>
+                  <Row
+                    label="导入本地数据"
+                    description="从 .zip 恢复数据库、设置与项目；不含登录凭据，导入前会自动保存本机快照。"
+                    last
+                    control={
+                      <Button size="sm" onClick={() => void pickLocalBackup(false)}>
+                        <Import className="size-3.5" /> 导入
+                      </Button>
+                    }
+                  />
+                  <div className="border-t border-line p-4">
+                    <div className="text-xs font-medium text-ink">加密备份</div>
                     <p className="mt-1 text-[0.68rem] leading-relaxed text-ink-3">
-                      加密导出会生成包含登录凭据的 *.hivebackup，并用下方口令加密。导入支持 .zip 与
-                      *.hivebackup，会覆盖当前数据库、设置与登录凭据；导入前会自动保存一份本机快照。
+                      加密导出生成包含登录凭据的 *.hivebackup；导入加密备份时必须输入导出时的同一口令。
+                      恢复会覆盖当前数据库、设置与登录凭据。
                     </p>
                     <div className="mt-3 flex flex-wrap items-center gap-2">
                       <Input
@@ -958,8 +984,8 @@ export function Settings() {
                       >
                         <Download className="size-3.5" /> 加密导出
                       </Button>
-                      <Button size="sm" onClick={() => void pickLocalBackup()}>
-                        <Import className="size-3.5" /> 导入备份
+                      <Button size="sm" onClick={() => void pickLocalBackup(true)}>
+                        <Import className="size-3.5" /> 导入加密备份
                       </Button>
                     </div>
                   </div>
@@ -1086,11 +1112,15 @@ export function Settings() {
                         />
                       </div>
                       <div className="mt-2 space-y-1.5">
-                        {webdavBackups.length === 0 ? (
+                        {webdavListError ? (
+                          <p className="text-[0.64rem] leading-relaxed text-warn">{webdavListError}</p>
+                        ) : null}
+                        {webdavBackups.length === 0 && !webdavListError ? (
                           <p className="text-[0.64rem] leading-relaxed text-ink-3">
                             {webdavListBusy ? '正在读取远程备份列表…' : '远程目录中没有找到 *.hivebackup 备份。'}
                           </p>
-                        ) : (
+                        ) : null}
+                        {webdavBackups.length > 0 ? (
                           webdavBackups.map((item) => (
                             <div
                               key={item.name}
@@ -1113,7 +1143,7 @@ export function Settings() {
                               </Button>
                             </div>
                           ))
-                        )}
+                        ) : null}
                       </div>
                     </div>
                   </div>
