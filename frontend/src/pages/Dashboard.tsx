@@ -15,7 +15,6 @@ import {
   Search,
   Settings2,
   Sparkles,
-  Wifi,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { format } from 'date-fns';
@@ -196,40 +195,6 @@ function StatCard({
   );
 }
 
-function ConnectionRow({
-  label,
-  connected,
-  detail,
-  onConfigure,
-}: {
-  label: string;
-  connected: boolean;
-  detail: string;
-  onConfigure: () => void;
-}) {
-  return (
-    <div className="flex items-center gap-2.5 px-4 py-2.5">
-      <span
-        className={cn(
-          'size-2 shrink-0 rounded-full',
-          connected ? 'bg-success shadow-[0_0_0_3px_color-mix(in_oklab,var(--success)_18%,transparent)]' : 'bg-line-strong',
-        )}
-      />
-      <div className="min-w-0 flex-1">
-        <div className="text-xs font-medium text-ink">{label}</div>
-        <div className="truncate text-[0.66rem] text-ink-3">{detail}</div>
-      </div>
-      <button
-        type="button"
-        onClick={onConfigure}
-        className="rounded-md px-2 py-1 text-[0.66rem] font-medium text-accent transition-colors hover:bg-accent-soft"
-      >
-        {connected ? '管理' : '配置'}
-      </button>
-    </div>
-  );
-}
-
 export function Dashboard() {
   const data = useDashboard();
   const navigate = useApp((state) => state.navigate);
@@ -280,8 +245,7 @@ export function Dashboard() {
   const canvasConnected = Boolean(data.canvas?.connected) || (mock && courses.length > 0);
   const mailConnected = Boolean(data.mail?.account) || mock;
   const campusConnected = Boolean(data.campus?.connected) || mock;
-  const shuiyuanEnabled = useSettings((state) => state.state.experiments.shuiyuan);
-  const shuiyuanConnected = Boolean(data.shuiyuan?.connected) || mock;
+  const courseConnected = Boolean(data.course?.loggedIn) || mock;
 
   const syncCanvas = async () => {
     toast.promise(call('canvas.syncCourses'), {
@@ -321,10 +285,9 @@ export function Dashboard() {
                 {unread > 0 ? `，${unread} 封未读邮件` : ''}。
               </p>
               <div className="mt-4 flex flex-wrap items-center gap-2">
-                <StatusChip label="Canvas" ok={canvasConnected} />
+                <StatusChip label="jAccount" ok={campusConnected} />
                 <StatusChip label="邮箱" ok={mailConnected} />
-                <StatusChip label="教学网" ok={campusConnected} />
-                {shuiyuanEnabled ? <StatusChip label="水源社区" ok={shuiyuanConnected} /> : null}
+                <StatusChip label="选课社区" ok={courseConnected} />
               </div>
             </div>
             <div className="flex shrink-0 items-center gap-2">
@@ -446,6 +409,33 @@ export function Dashboard() {
             </Card>
 
             <Card>
+              <div className="flex items-center gap-2 border-b border-line px-4 py-3">
+                <Sparkles className="size-4 text-accent" />
+                <h2 className="text-sm font-semibold text-ink">快捷操作</h2>
+              </div>
+              <div className="grid grid-cols-2 gap-2 p-3 sm:grid-cols-3">
+                <QuickAction
+                  icon={FolderOpen}
+                  label="新建笔记"
+                  onClick={() => navigate('workspace', { newNote: true })}
+                />
+                <QuickAction icon={CalendarDays} label="查看日程" onClick={() => navigate('timetable')} />
+                <QuickAction icon={RefreshCw} label="同步 Canvas" onClick={() => void syncCanvas()} />
+                <QuickAction icon={Inbox} label="收取邮件" onClick={() => void syncMail()} />
+                <QuickAction
+                  icon={Settings2}
+                  label="全部设置"
+                  onClick={() => navigate('settings')}
+                />
+                <QuickAction
+                  icon={Bell}
+                  label="通知中心"
+                  onClick={() => useApp.getState().navigate('notifications')}
+                />
+              </div>
+            </Card>
+
+            <Card>
               <div className="flex items-center justify-between border-b border-line px-4 py-3">
                 <div className="flex items-center gap-2">
                   <FolderOpen className="size-4 text-accent" />
@@ -534,74 +524,7 @@ export function Dashboard() {
 
             <PortalMessageCard />
 
-            <Card>
-              <div className="flex items-center gap-2 border-b border-line px-4 py-3">
-                <Wifi className="size-4 text-success" />
-                <h2 className="text-sm font-semibold text-ink">账号连接</h2>
-              </div>
-              <div className="divide-y divide-line">
-                <ConnectionRow
-                  label="Canvas"
-                  connected={canvasConnected}
-                  detail={canvasConnected ? `${activeCourses.length} 门课程` : '使用 Access Token 连接'}
-                  onConfigure={() => navigate('settings', { settingsSection: 'accounts' })}
-                />
-                <ConnectionRow
-                  label="校园邮箱"
-                  connected={mailConnected}
-                  detail={
-                    data.mail?.account?.address ??
-                    (mock ? 'student@sjtu.edu.cn' : 'IMAP / SMTP 只保存在本机')
-                  }
-                  onConfigure={() => navigate('settings', { settingsSection: 'accounts' })}
-                />
-                <ConnectionRow
-                  label="教学信息服务网"
-                  connected={campusConnected}
-                  detail={campusConnected ? '日程与课堂视频可用' : '登录后同步日程'}
-                  onConfigure={() => navigate('settings', { settingsSection: 'accounts' })}
-                />
-                {shuiyuanEnabled ? (
-                  <ConnectionRow
-                    label="水源社区"
-                    connected={shuiyuanConnected}
-                    detail={
-                      data.shuiyuan?.username
-                        ? `@${data.shuiyuan.username} · Discourse User API Key`
-                        : 'Discourse User API Key'
-                    }
-                    onConfigure={() => navigate('shuiyuan')}
-                  />
-                ) : null}
-              </div>
-            </Card>
 
-            <Card>
-              <div className="flex items-center gap-2 border-b border-line px-4 py-3">
-                <Sparkles className="size-4 text-accent" />
-                <h2 className="text-sm font-semibold text-ink">快捷操作</h2>
-              </div>
-              <div className="grid grid-cols-2 gap-2 p-3">
-                <QuickAction
-                  icon={FolderOpen}
-                  label="新建笔记"
-                  onClick={() => navigate('workspace', { newNote: true })}
-                />
-                <QuickAction icon={CalendarDays} label="查看日程" onClick={() => navigate('timetable')} />
-                <QuickAction icon={RefreshCw} label="同步 Canvas" onClick={() => void syncCanvas()} />
-                <QuickAction icon={Inbox} label="收取邮件" onClick={() => void syncMail()} />
-                <QuickAction
-                  icon={Settings2}
-                  label="全部设置"
-                  onClick={() => navigate('settings')}
-                />
-                <QuickAction
-                  icon={Bell}
-                  label="通知中心"
-                  onClick={() => useApp.getState().navigate('notifications')}
-                />
-              </div>
-            </Card>
           </div>
         </div>
 

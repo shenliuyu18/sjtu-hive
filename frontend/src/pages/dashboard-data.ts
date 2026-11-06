@@ -6,12 +6,16 @@ import type {
   MailFolder,
   MailState,
   RecentFile,
-  ShuiyuanState,
   TimetableItem,
   TimetableQuery,
   TodoItem,
 } from '@/lib/models';
 import { todayRange } from '@/lib/format';
+
+export interface CourseStatus {
+  loggedIn: boolean;
+  user: { username: string; email: string } | null;
+}
 
 export interface DashboardData {
   canvas: CanvasState | null;
@@ -22,7 +26,7 @@ export interface DashboardData {
   todos: TodoItem[];
   recent: RecentFile[];
   campus: CampusStatus | null;
-  shuiyuan: ShuiyuanState | null;
+  course: CourseStatus | null;
   loading: boolean;
   refresh: () => void;
 }
@@ -36,7 +40,7 @@ const empty: DashboardData = {
   todos: [],
   recent: [],
   campus: null,
-  shuiyuan: null,
+  course: null,
   loading: true,
   refresh: () => {},
 };
@@ -60,7 +64,7 @@ export function useDashboard(): DashboardData {
       call<TodoItem[]>('todo.list'),
       call<RecentFile[]>('workspace.recent'),
       call<CampusStatus>('campus.status'),
-      call<ShuiyuanState>('shuiyuan.state'),
+      call<CourseStatus>('course.state'),
     ]).then((results) => {
       if (!alive) return;
       const value = <T,>(index: number): T | null => {
@@ -86,7 +90,7 @@ export function useDashboard(): DashboardData {
       const todos = value<TodoItem[]>(4) ?? [];
       const recent = value<RecentFile[]>(5) ?? [];
       const campus = value<CampusStatus>(6);
-      const shuiyuan = value<ShuiyuanState>(7);
+      const course = value<CourseStatus>(7);
       setData({
         canvas,
         mail,
@@ -96,7 +100,7 @@ export function useDashboard(): DashboardData {
         todos,
         recent,
         campus,
-        shuiyuan,
+        course,
         loading: false,
         refresh: () => setTick((n) => n + 1),
       });
