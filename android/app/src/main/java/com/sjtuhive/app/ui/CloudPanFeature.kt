@@ -224,7 +224,7 @@ fun CloudPanScreen(
     }
 }
 
-private fun startDownload(context: Context, url: String, name: String) {
+internal fun startDownload(context: Context, url: String, name: String) {
     val request = DownloadManager.Request(Uri.parse(url))
         .setTitle(name)
         .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)

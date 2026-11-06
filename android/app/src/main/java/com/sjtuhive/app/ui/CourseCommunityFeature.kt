@@ -62,6 +62,15 @@ fun CourseCommunityScreen(context: Context, onClose: () -> Unit) {
     var error by remember { mutableStateOf<String?>(null) }
 
     var hot by remember { mutableStateOf<List<CourseSummary>>(emptyList()) }
+    var homeReviews by remember { mutableStateOf<List<CourseReview>>(emptyList()) }
+    var followed by remember { mutableStateOf<List<CourseSummary>>(emptyList()) }
+    var homeLoading by remember { mutableStateOf(false) }
+    var searchMode by remember { mutableStateOf(false) }
+    var mineMode by remember { mutableStateOf(false) }
+    var mine by remember { mutableStateOf<List<CourseSummary>>(emptyList()) }
+    var minePage by remember { mutableIntStateOf(1) }
+    var mineTotal by remember { mutableIntStateOf(0) }
+    var mineLoading by remember { mutableStateOf(false) }
     var courses by remember { mutableStateOf<List<CourseSummary>>(emptyList()) }
     var departments by remember { mutableStateOf<List<CourseFilterOption>>(emptyList()) }
     var query by remember { mutableStateOf("") }
@@ -88,19 +97,61 @@ fun CourseCommunityScreen(context: Context, onClose: () -> Unit) {
         }
     }
 
+    fun loadMine(nextPage: Int = 1) {
+        scope.launch {
+            mineLoading = true
+            error = null
+            runCatching { api.followed(nextPage, 20) }
+                .onSuccess {
+                    mine = if (nextPage <= 1) it.items else mine + it.items
+                    minePage = it.page
+                    mineTotal = it.total
+                }
+                .onFailure { error = it.message ?: "读取我的课程失败" }
+            mineLoading = false
+        }
+    }
+
+    fun loadHome() {
+        scope.launch {
+            homeLoading = true
+            runCatching { api.hot(10) }.onSuccess { hot = it }
+            runCatching { api.filters() }.onSuccess { departments = it.departments.take(8) }
+            runCatching { api.recentReviews(1, 20) }
+                .onSuccess { homeReviews = it.items }
+                .onFailure { error = it.message }
+            runCatching { api.followed(1, 10) }
+                .onSuccess { followed = it.items }
+            homeLoading = false
+        }
+    }
+
+    fun openDetail(course: CourseSummary) {
+        detailLoading = true
+        scope.launch {
+            runCatching { api.detail(course.id) }
+                .onSuccess { detail = it }
+                .onFailure { error = it.message }
+            runCatching { api.reviews(course.id, 1, 12) }
+                .onSuccess { reviews = it.items }
+            detailLoading = false
+        }
+    }
+
     LaunchedEffect(Unit) {
         val current = runCatching { api.state() }.getOrNull()
         user = current
         checking = false
-        if (current != null) {
-            runCatching { api.hot(6) }.onSuccess { hot = it }
-            runCatching { api.filters() }.onSuccess { departments = it.departments.take(8) }
-            loadCourses(1)
-        }
+        if (current != null) loadHome()
     }
 
     BackHandler {
-        if (detail != null) detail = null else onClose()
+        when {
+            mineMode -> mineMode = false
+            searchMode -> searchMode = false
+            detail != null -> detail = null
+            else -> onClose()
+        }
     }
 
     Column(
@@ -114,7 +165,14 @@ fun CourseCommunityScreen(context: Context, onClose: () -> Unit) {
                 .padding(start = 8.dp, end = 12.dp, top = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            TextButton(onClick = { if (detail != null) detail = null else onClose() }) { Text("← 返回") }
+            TextButton(onClick = {
+                when {
+                    mineMode -> mineMode = false
+                    searchMode -> searchMode = false
+                    detail != null -> detail = null
+                    else -> onClose()
+                }
+            }) { Text("← 返回") }
             Column(Modifier.weight(1f)) {
                 Text("选课社区", style = MaterialTheme.typography.titleLarge)
                 Text(
@@ -158,9 +216,7 @@ fun CourseCommunityScreen(context: Context, onClose: () -> Unit) {
                             .onSuccess {
                                 user = it
                                 password = ""
-                                runCatching { api.hot(6) }.onSuccess { hot = it }
-                                runCatching { api.filters() }.onSuccess { departments = it.departments.take(8) }
-                                loadCourses(1)
+                                loadHome()
                             }
                             .onFailure { error = it.message ?: "登录失败" }
                         loginBusy = false
@@ -183,80 +239,130 @@ fun CourseCommunityScreen(context: Context, onClose: () -> Unit) {
                     placeholder = { Text("搜索课程名、课程代码或教师") },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                    keyboardActions = KeyboardActions(onSearch = { loadCourses(1) }),
+                    keyboardActions = KeyboardActions(onSearch = {
+                        searchMode = true
+                        loadCourses(1)
+                    }),
                 )
-                if (hot.isNotEmpty() && query.isBlank()) {
-                    Text(
-                        "热门课程",
-                        modifier = Modifier.padding(start = 20.dp, top = 14.dp, bottom = 6.dp),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                    LazyRow(
-                        modifier = Modifier.fillMaxWidth(),
-                        contentPadding = PaddingValues(horizontal = 16.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        items(hot) { course ->
-                            Column(
-                                Modifier
-                                    .width(190.dp)
-                                    .clip(RoundedCornerShape(14.dp))
-                                    .background(MaterialTheme.colorScheme.surface)
-                                    .clickable {
-                                        openCourse(scope, api, course, onDetail = { d, r ->
-                                            detail = d
-                                            reviews = r
-                                            detailLoading = false
-                                        }, onLoading = { detailLoading = it })
-                                    }
-                                    .padding(12.dp),
-                                verticalArrangement = Arrangement.spacedBy(3.dp),
-                            ) {
-                                Text(
-                                    course.name,
-                                    style = MaterialTheme.typography.titleSmall,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                                Text(
-                                    listOf(course.code, course.teacher).filter { it.isNotBlank() }.joinToString(" · "),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                                Text(
-                                    if (course.rating.score > 0) "★ %.2f".format(course.rating.score) else "暂无评分",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.tertiary,
+                if (searchMode) {
+                    TextButton(onClick = { searchMode = false }) { Text("← 返回首页") }
+                    if (departments.isNotEmpty()) {
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 6.dp),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            FilterChip(
+                                selected = department.isEmpty(),
+                                onClick = { department = ""; loadCourses(1) },
+                                label = { Text("全部") },
+                            )
+                            departments.take(3).forEach { option ->
+                                FilterChip(
+                                    selected = department == option.name,
+                                    onClick = { department = option.name; loadCourses(1) },
+                                    label = { Text(option.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                                 )
                             }
                         }
                     }
-                }
-                if (departments.isNotEmpty()) {
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        FilterChip(
-                            selected = department.isEmpty(),
-                            onClick = { department = ""; loadCourses(1) },
-                            label = { Text("全部") },
-                        )
-                        departments.take(3).forEach { option ->
-                            FilterChip(
-                                selected = department == option.name,
-                                onClick = { department = option.name; loadCourses(1) },
-                                label = { Text(option.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                            )
+                    if (loading && courses.isEmpty()) {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+                    } else {
+                        LazyColumn(
+                            modifier = Modifier.fillMaxSize(),
+                            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 40.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            items(courses, key = { it.id }) { course ->
+                                CourseRow(course) { openDetail(course) }
+                            }
+                            if (courses.isEmpty() && error == null) {
+                                item { Text("没有找到课程。", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                            }
+                            if (courses.size < total) {
+                                item {
+                                    TextButton(
+                                        onClick = { loadCourses(page + 1) },
+                                        modifier = Modifier.fillMaxWidth(),
+                                    ) { Text(if (loading) "加载中…" else "加载更多（${courses.size}/$total）") }
+                                }
+                            }
+                            error?.let { message ->
+                                item {
+                                    Text(
+                                        message,
+                                        color = MaterialTheme.colorScheme.error,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        modifier = Modifier.padding(12.dp),
+                                    )
+                                }
+                            }
                         }
                     }
-                }
-                if (loading && courses.isEmpty()) {
+                } else if (mineMode) {
+                    Column(Modifier.fillMaxSize()) {
+                        TextButton(onClick = { mineMode = false }) { Text("← 返回首页") }
+                        if (mineLoading && mine.isEmpty()) {
+                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+                        } else {
+                            LazyColumn(
+                                modifier = Modifier.fillMaxSize(),
+                                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 40.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                item {
+                                    Row(
+                                        Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Text(
+                                            "我的课程",
+                                            style = MaterialTheme.typography.titleSmall,
+                                            color = MaterialTheme.colorScheme.primary,
+                                        )
+                                        Text(
+                                            "共 $mineTotal 门",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                }
+                                items(mine, key = { it.id }) { course ->
+                                    CourseRow(course) { openDetail(course) }
+                                }
+                                if (mine.isEmpty() && error == null) {
+                                    item {
+                                        Text(
+                                            "暂无我的课程。在 course.sjtu.plus 关注课程后会显示在这里。",
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                }
+                                if (mine.size < mineTotal) {
+                                    item {
+                                        TextButton(
+                                            onClick = { loadMine(minePage + 1) },
+                                            modifier = Modifier.fillMaxWidth(),
+                                        ) { Text(if (mineLoading) "加载中…" else "加载更多（${mine.size}/$mineTotal）") }
+                                    }
+                                }
+                                error?.let { message ->
+                                    item {
+                                        Text(
+                                            message,
+                                            color = MaterialTheme.colorScheme.error,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            modifier = Modifier.padding(12.dp),
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else if (homeLoading && homeReviews.isEmpty() && hot.isEmpty()) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
                 } else {
                     LazyColumn(
@@ -264,28 +370,63 @@ fun CourseCommunityScreen(context: Context, onClose: () -> Unit) {
                         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 40.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        if (hot.isNotEmpty() && query.isBlank()) {
-                            item { Text("全部课程", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary) }
+                        item {
+                            Text(
+                                "最新点评",
+                                style = MaterialTheme.typography.titleSmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(vertical = 4.dp),
+                            )
                         }
-                        items(courses, key = { it.id }) { course ->
-                            CourseRow(course) {
-                                detailLoading = true
-                                scope.launch {
-                                    runCatching { api.detail(course.id) }
-                                        .onSuccess { detail = it }
-                                        .onFailure { error = it.message }
-                                    runCatching { api.reviews(course.id, 1, 12) }
-                                        .onSuccess { reviews = it.items }
-                                    detailLoading = false
+                        items(homeReviews, key = { "review-${it.id}" }) { review ->
+                            HomeReviewRow(review) { review.course?.let { openDetail(it) } }
+                        }
+                        if (hot.isNotEmpty()) {
+                            item {
+                                Text(
+                                    "热门课程",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.padding(top = 8.dp, bottom = 4.dp),
+                                )
+                                LazyRow(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    contentPadding = PaddingValues(vertical = 2.dp),
+                                ) {
+                                    items(hot) { course -> HotCard(course) { openDetail(course) } }
                                 }
                             }
                         }
-                        if (courses.size < total) {
+                        item {
+                            Row(
+                                Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    "我的课程",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.padding(top = 8.dp, bottom = 4.dp),
+                                )
+                                TextButton(onClick = {
+                                    mineMode = true
+                                    loadMine(1)
+                                }) { Text("查看更多") }
+                            }
+                        }
+                        if (followed.isEmpty()) {
                             item {
-                                TextButton(
-                                    onClick = { loadCourses(page + 1) },
-                                    modifier = Modifier.fillMaxWidth(),
-                                ) { Text(if (loading) "加载中…" else "加载更多（${courses.size}/$total）") }
+                                Text(
+                                    "暂无我的课程。",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(vertical = 4.dp),
+                                )
+                            }
+                        } else {
+                            items(followed, key = { "follow-${it.id}" }) { course ->
+                                CourseRow(course) { openDetail(course) }
                             }
                         }
                         error?.let { message ->
@@ -302,6 +443,78 @@ fun CourseCommunityScreen(context: Context, onClose: () -> Unit) {
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun HomeReviewRow(review: CourseReview, onClick: () -> Unit) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(MaterialTheme.colorScheme.surface)
+            .clickable(onClick = onClick)
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(
+                review.course?.name ?: "课程评价",
+                style = MaterialTheme.typography.titleSmall,
+                modifier = Modifier.weight(1f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                if (review.rating > 0) "${review.rating} 分" else review.score,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.tertiary,
+            )
+        }
+        Text(
+            review.course?.let { listOf(it.code, it.teacher).filter { v -> v.isNotBlank() }.joinToString(" · ") }
+                ?: review.semester,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            review.content.ifBlank { "（无内容）" },
+            style = MaterialTheme.typography.bodySmall,
+            maxLines = 3,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            listOf(review.semester, review.createdAt.take(10)).filter { it.isNotBlank() }.joinToString(" · "),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun HotCard(course: CourseSummary, onClick: () -> Unit) {
+    Column(
+        Modifier
+            .width(180.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(MaterialTheme.colorScheme.surface)
+            .clickable(onClick = onClick)
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(3.dp),
+    ) {
+        Text(course.name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(
+            listOf(course.code, course.teacher).filter { it.isNotBlank() }.joinToString(" · "),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+        Text(
+            if (course.rating.score > 0) "★ %.2f".format(course.rating.score) else "暂无评分",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.tertiary,
+        )
     }
 }
 

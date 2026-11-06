@@ -36,6 +36,7 @@ data class CourseDetail(
 
 data class CourseReview(
     val id: Long,
+    val course: CourseSummary?,
     val semester: String,
     val score: String,
     val rating: Int,
@@ -150,6 +151,29 @@ class CourseApi(private val context: Context) {
             pageSize = data.optInt("page_size", pageSize),
         )
     }
+
+    suspend fun recentReviews(page: Int = 1, pageSize: Int = 20): CourseReviewPage =
+        withContext(Dispatchers.IO) {
+            val data = get("/review?page=${page.coerceAtLeast(1)}&page_size=${pageSize.coerceIn(1, 50)}")
+            val array = data.optJSONArray("items") ?: JSONArray()
+            CourseReviewPage(
+                items = (0 until array.length()).mapNotNull { index -> array.optJSONObject(index)?.toReview() },
+                total = data.optInt("total"),
+                page = data.optInt("page", 1),
+                pageSize = data.optInt("page_size", pageSize),
+            )
+        }
+
+    suspend fun followed(page: Int = 1, pageSize: Int = 10): CoursePage =
+        withContext(Dispatchers.IO) {
+            val data = get("/course/followed?page=${page.coerceAtLeast(1)}&page_size=${pageSize.coerceIn(1, 50)}")
+            CoursePage(
+                items = data.optJSONArray("items").toCourseSummaries(),
+                total = data.optInt("total"),
+                page = data.optInt("page", 1),
+                pageSize = data.optInt("page_size", pageSize),
+            )
+        }
 
     suspend fun detail(id: Long): CourseDetail = withContext(Dispatchers.IO) {
         val data = get("/course/$id")
@@ -304,6 +328,7 @@ class CourseApi(private val context: Context) {
 
     private fun JSONObject.toReview(): CourseReview = CourseReview(
         id = optLong("id"),
+        course = optJSONObject("course")?.toCourseSummary(),
         semester = optString("semester"),
         score = optString("score"),
         rating = optInt("rating"),

@@ -1,9 +1,8 @@
 package com.sjtuhive.app.ui
 
 import android.content.Context
-import android.content.Intent
-import android.net.Uri
 import android.webkit.WebView
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -20,6 +19,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -59,6 +59,7 @@ fun ShareScreen(context: Context, onClose: () -> Unit) {
     var detail by remember { mutableStateOf<ShareMaterial?>(null) }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    var pendingPurchase by remember { mutableStateOf<ShareMaterial?>(null) }
     var reload by remember { mutableStateOf(0) }
 
     fun handleError(cause: Throwable) {
@@ -108,7 +109,44 @@ fun ShareScreen(context: Context, onClose: () -> Unit) {
         }
     }
 
-    fun download(material: ShareMaterial) {
+    fun purchase(material: ShareMaterial) {
+        scope.launch {
+            loading = true
+            error = null
+            runCatching { api.purchase(material.id) }
+                .onSuccess {
+                    val updated = material.copy(hasPurchased = true)
+                    detail = updated
+                    materials = materials.map { if (it.id == material.id) updated else it }
+                    Toast.makeText(
+                        context,
+                        if ((material.points ?: 0) > 0) "兑换成功，可以打开或下载" else "已免费领取，可以打开或下载",
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                }
+                .onFailure { handleError(it) }
+            loading = false
+        }
+    }
+
+    fun openFile(material: ShareMaterial) {
+        val fileName = material.fileName.ifBlank { material.title }
+        PreviewHost.open(
+            PreviewRequest(
+                title = material.title,
+                fileName = fileName,
+                load = { api.downloadToCache(material.id, fileName) },
+                download = {
+                    val url = api.download(material.id)
+                    if (url.isBlank()) throw IllegalStateException("没有获取到下载链接")
+                    startDownload(context, url, fileName)
+                    "已开始下载到系统下载目录"
+                },
+            ),
+        )
+    }
+
+    fun save(material: ShareMaterial) {
         scope.launch {
             loading = true
             runCatching { api.download(material.id) }
@@ -117,11 +155,9 @@ fun ShareScreen(context: Context, onClose: () -> Unit) {
                         error = "没有获取到下载链接"
                     } else {
                         runCatching {
-                            context.startActivity(
-                                Intent(Intent.ACTION_VIEW, Uri.parse(url))
-                                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-                            )
-                        }.onFailure { error = it.message ?: "无法打开下载链接" }
+                            startDownload(context, url, material.fileName.ifBlank { material.title })
+                            Toast.makeText(context, "已开始下载到系统下载目录", Toast.LENGTH_SHORT).show()
+                        }.onFailure { error = it.message ?: "下载失败" }
                     }
                 }
                 .onFailure { handleError(it) }
@@ -150,6 +186,23 @@ fun ShareScreen(context: Context, onClose: () -> Unit) {
             },
         )
         return
+    }
+
+    pendingPurchase?.let { target ->
+        AlertDialog(
+            onDismissRequest = { pendingPurchase = null },
+            title = { Text("兑换资料") },
+            text = { Text("该资料需要 ${target.points ?: 0} 积分兑换，确定继续吗？") },
+            confirmButton = {
+                TextButton(onClick = {
+                    pendingPurchase = null
+                    purchase(target)
+                }) { Text("兑换") }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingPurchase = null }) { Text("取消") }
+            },
+        )
     }
 
     Column(
@@ -209,7 +262,15 @@ fun ShareScreen(context: Context, onClose: () -> Unit) {
         }
 
         if (detail != null) {
-            MaterialDetail(detail!!, loading = loading, onDownload = { download(detail!!) })
+            MaterialDetail(
+                material = detail!!,
+                loading = loading,
+                onPurchase = { material ->
+                    if ((material.points ?: 0) > 0) pendingPurchase = material else purchase(material)
+                },
+                onOpen = { openFile(detail!!) },
+                onSave = { save(detail!!) },
+            )
             return@Column
         }
 
@@ -302,7 +363,13 @@ private fun InfoRow(title: String, subtitle: String, onClick: () -> Unit) {
 }
 
 @Composable
-private fun MaterialDetail(material: ShareMaterial, loading: Boolean, onDownload: () -> Unit) {
+private fun MaterialDetail(
+    material: ShareMaterial,
+    loading: Boolean,
+    onPurchase: (ShareMaterial) -> Unit,
+    onOpen: () -> Unit,
+    onSave: () -> Unit,
+) {
     Column(
         Modifier
             .fillMaxSize()
@@ -321,11 +388,23 @@ private fun MaterialDetail(material: ShareMaterial, loading: Boolean, onDownload
                 .padding(14.dp),
         )
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = onDownload, enabled = !loading) {
-                if (loading) CircularProgressIndicator(Modifier.padding(end = 8.dp)) else Unit
-                Text("下载 / 打开")
+            if (material.hasPurchased) {
+                Button(onClick = onOpen, enabled = !loading) { Text("打开") }
+                Button(onClick = onSave, enabled = !loading) { Text("下载") }
+            } else {
+                Button(onClick = { onPurchase(material) }, enabled = !loading) {
+                    if (loading) CircularProgressIndicator(Modifier.padding(end = 8.dp)) else Unit
+                    Text(if ((material.points ?: 0) > 0) "${material.points} 积分兑换" else "免费领取")
+                }
             }
             material.points?.let { Text("$it 积分", color = MaterialTheme.colorScheme.tertiary) }
+        }
+        if (!material.hasPurchased) {
+            Text(
+                "领取后即可打开或下载；0 积分资料免费领取。",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }

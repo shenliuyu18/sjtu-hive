@@ -9,6 +9,7 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
 import java.util.concurrent.TimeUnit
 
 data class ShareCourse(val id: Long, val name: String, val subtitle: String)
@@ -19,6 +20,9 @@ data class ShareMaterial(
     val subtitle: String,
     val description: String,
     val points: Int?,
+    val fileName: String,
+    val hasPurchased: Boolean,
+    val isMine: Boolean,
 )
 
 /** 传承交大（share.dyweb.sjtu.cn）只读客户端；token 由 WebView 登录流程写入。 */
@@ -92,6 +96,27 @@ class ShareApi(private val context: Context) {
         }
     }
 
+    suspend fun purchase(id: Long) = withContext(Dispatchers.IO) {
+        get("/api/v1/material/purchase/$id")
+    }
+
+    suspend fun downloadToCache(id: Long, fileName: String): File = withContext(Dispatchers.IO) {
+        val url = download(id)
+        if (url.isBlank()) throw IllegalStateException("没有获取到下载链接")
+        val safeName = fileName.ifBlank { "share-$id" }
+        val directory = File(context.cacheDir, "share").apply { mkdirs() }
+        val target = File(directory, "${id}-$safeName")
+        if (target.exists() && target.length() > 0) return@withContext target
+        val request = Request.Builder().url(url).get().build()
+        client.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) throw IllegalStateException("下载资料失败：HTTP ${response.code}")
+            response.body?.byteStream()?.use { input ->
+                target.outputStream().use { output -> input.copyTo(output) }
+            } ?: throw IllegalStateException("下载资料失败：没有响应内容")
+        }
+        target
+    }
+
     private fun get(path: String): Any = request(path, null, "GET")
 
     private fun post(path: String, body: JSONObject): Any = request(path, body, "POST")
@@ -111,19 +136,24 @@ class ShareApi(private val context: Context) {
         }
         client.newCall(builder.build()).execute().use { response ->
             val text = response.body?.string().orEmpty()
-            if (response.code == 401 || response.code == 403) {
+            if (response.code == 401) {
                 logout()
                 throw ShareAuthException("传承交大登录已失效，请重新登录")
             }
             val envelope = runCatching { JSONObject(text) }.getOrNull()
             if (envelope == null) {
-                if (!response.isSuccessful) throw ShareAuthException("传承交大返回 HTTP ${response.code}")
+                if (!response.isSuccessful) throw IllegalStateException("传承交大返回 HTTP ${response.code}")
                 return text
             }
             if (!envelope.optBoolean("success", false)) {
-                throw ShareAuthException(envelope.optString("message").ifBlank { "传承交大返回 HTTP ${response.code}" })
+                if (response.code == 401) {
+                    logout()
+                    throw ShareAuthException("传承交大登录已失效，请重新登录")
+                }
+                val message = shareErrorMessage(envelope.optString("message"))
+                throw IllegalStateException(message.ifBlank { "传承交大返回 HTTP ${response.code}" })
             }
-            if (!response.isSuccessful) throw ShareAuthException("传承交大返回 HTTP ${response.code}")
+            if (!response.isSuccessful) throw IllegalStateException("传承交大返回 HTTP ${response.code}")
             return unwrap(envelope.opt("data"))
         }
     }
@@ -160,7 +190,17 @@ class ShareApi(private val context: Context) {
         val points = runCatching {
             if (has("points") && !isNull("points")) optInt("points") else null
         }.getOrNull()
-        return ShareMaterial(id, title, subtitle, text(this, "description", "content"), points)
+        val fileName = text(this, "file_name", "name", "title").ifBlank { "share-$id" }
+        return ShareMaterial(
+            id = id,
+            title = title,
+            subtitle = subtitle,
+            description = text(this, "description", "content"),
+            points = points,
+            fileName = fileName,
+            hasPurchased = optBoolean("has_purchased", false) || optBoolean("is_mine", false),
+            isMine = optBoolean("is_mine", false),
+        )
     }
 
     private fun text(obj: JSONObject, vararg keys: String): String {
@@ -183,3 +223,8 @@ class ShareApi(private val context: Context) {
 }
 
 class ShareAuthException(message: String) : Exception(message)
+
+private fun shareErrorMessage(message: String): String = when (message.trim()) {
+    "you have not purchase the material!" -> "该资料需要先兑换或领取后才能下载"
+    else -> message.trim()
+}
