@@ -110,6 +110,41 @@ func NewSettings(db *sql.DB, emit func(string, any)) (*Settings, error) {
 	return s, nil
 }
 
+// Reload re-reads the settings table after a backup has been restored.
+func (s *Settings) Reload() error {
+	for key, value := range defaultSettings {
+		if _, err := s.db.Exec(
+			`INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO NOTHING`,
+			key, value, Now(),
+		); err != nil {
+			return err
+		}
+	}
+	rows, err := s.db.Query(`SELECT key, value FROM settings`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	next := make(map[string]string)
+	for rows.Next() {
+		var key, value string
+		if err := rows.Scan(&key, &value); err != nil {
+			return err
+		}
+		next[key] = value
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.cache = next
+	s.mu.Unlock()
+	if s.emit != nil {
+		s.emit("settings.changed", s.State())
+	}
+	return nil
+}
+
 func (s *Settings) Register(router *Router) {
 	router.Handle("settings.state", func([]json.RawMessage) (any, error) {
 		return s.State(), nil

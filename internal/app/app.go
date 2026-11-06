@@ -34,38 +34,39 @@ type AppInfo struct {
 }
 
 type App struct {
-	ctx            context.Context
-	cancel         context.CancelFunc
-	paths          Paths
-	db             *sql.DB
-	logger         *slog.Logger
-	closeLog       func()
-	secrets        *SecretStore
-	settings       *Settings
-	media          *MediaServer
-	router         *Router
-	campus         *CampusSession
-	timetable      *Timetable
-	todo           *Todo
-	workspace      *Workspace
-	canvas         *Canvas
-	mail           *Mail
-	classroom      *Classroom
-	shuiyuan       *Shuiyuan
-	schoolCalendar *SchoolCalendar
-	portalMessages *PortalMessages
-	cloudPan       *CloudPan
-	course         *CourseCommunity
-	share          *Share
-	exams          *Exams
-	search         *Search
-	notifications  *Notifications
-	update         *Update
-	tray           *Tray
-	quitRequested  atomic.Bool
-	trayHintShown  atomic.Bool
-	startErr       error
-	started        time.Time
+	ctx              context.Context
+	cancel           context.CancelFunc
+	paths            Paths
+	db               *sql.DB
+	logger           *slog.Logger
+	closeLog         func()
+	secrets          *SecretStore
+	settings         *Settings
+	media            *MediaServer
+	router           *Router
+	campus           *CampusSession
+	timetable        *Timetable
+	todo             *Todo
+	workspace        *Workspace
+	canvas           *Canvas
+	mail             *Mail
+	classroom        *Classroom
+	shuiyuan         *Shuiyuan
+	schoolCalendar   *SchoolCalendar
+	portalMessages   *PortalMessages
+	cloudPan         *CloudPan
+	course           *CourseCommunity
+	share            *Share
+	exams            *Exams
+	search           *Search
+	notifications    *Notifications
+	update           *Update
+	tray             *Tray
+	quitRequested    atomic.Bool
+	restartRequested atomic.Bool
+	trayHintShown    atomic.Bool
+	startErr         error
+	started          time.Time
 }
 
 func NewApp() *App {
@@ -322,6 +323,26 @@ func (a *App) registerServices() {
 	a.router.Handle("app.exportBackup", func([]json.RawMessage) (any, error) {
 		return a.ExportBackup()
 	})
+	a.router.Handle("app.exportBackupEncrypted", func(args []json.RawMessage) (any, error) {
+		passphrase, _, _ := DecodeOptionalArg[string](args, 0)
+		return a.ExportBackupEncrypted(passphrase)
+	})
+	a.router.Handle("app.chooseBackup", func([]json.RawMessage) (any, error) {
+		return a.ChooseBackup()
+	})
+	a.router.Handle("app.importBackup", func(args []json.RawMessage) (any, error) {
+		source, err := DecodeArg[string](args, 0)
+		if err != nil {
+			return nil, err
+		}
+		passphrase, _, _ := DecodeOptionalArg[string](args, 1)
+		return a.ImportBackup(source, passphrase)
+	})
+	a.router.Handle("app.restart", func([]json.RawMessage) (any, error) {
+		a.restartRequested.Store(true)
+		a.QuitApp()
+		return true, nil
+	})
 	a.registerWebDAV(a.router)
 	a.startCanvasBackground()
 	a.router.Handle("classroom.exportTranscript", func(args []json.RawMessage) (any, error) {
@@ -495,6 +516,22 @@ func (a *App) Shutdown(context.Context) {
 	if a.closeLog != nil {
 		a.closeLog()
 	}
+	if a.restartRequested.Load() {
+		a.relaunch()
+	}
+}
+
+// relaunch starts a fresh process after the data directory has been released,
+// so a restored database is opened by the new instance instead of this one.
+func (a *App) relaunch() {
+	executable, err := os.Executable()
+	if err != nil {
+		return
+	}
+	command := exec.Command(executable)
+	command.Dir = filepath.Dir(executable)
+	hideConsoleWindow(command)
+	_ = command.Start()
 }
 
 func (a *App) emit(name string, data any) {

@@ -1,11 +1,13 @@
 import type { LucideIcon } from 'lucide-react';
 import {
   AlertTriangle,
+  CloudDownload,
   CloudUpload,
   Database,
   Download,
   ExternalLink,
   FolderCog,
+  Import,
   Info,
   KeyRound,
   Laptop,
@@ -13,6 +15,7 @@ import {
   Mail,
   Palette,
   RefreshCw,
+  RotateCcw,
   Server,
   Settings2,
   ShieldCheck,
@@ -37,6 +40,10 @@ import { Dialog, DialogContent } from '@/components/ui/Dialog';
 import { Badge, PageHeader } from '@/components/ui/Misc';
 
 type SectionId = 'accounts' | 'appearance' | 'general' | 'storage' | 'about';
+
+type WebdavBackup = { name: string; size: number; modifiedAt: string };
+
+type PendingImport = { kind: 'local'; path: string } | { kind: 'webdav'; name: string };
 
 const sections: { id: SectionId; label: string; icon: LucideIcon }[] = [
   { id: 'accounts', label: '账户与连接', icon: Users },
@@ -171,6 +178,13 @@ export function Settings() {
   const [webdavUser, setWebdavUser] = useState('');
   const [webdavPass, setWebdavPass] = useState('');
   const [webdavPassphrase, setWebdavPassphrase] = useState('');
+  const [localPassphrase, setLocalPassphrase] = useState('');
+  const [restorePassphrase, setRestorePassphrase] = useState('');
+  const [webdavBackups, setWebdavBackups] = useState<WebdavBackup[]>([]);
+  const [webdavListBusy, setWebdavListBusy] = useState(false);
+  const [pendingImport, setPendingImport] = useState<PendingImport | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [restoredName, setRestoredName] = useState<string | null>(null);
 
   const refreshAccounts = () => {
     void Promise.allSettled([
@@ -206,6 +220,25 @@ export function Settings() {
   useEffect(() => {
     if (params.settingsSection) setSection(params.settingsSection as SectionId);
   }, [params.settingsSection]);
+
+  useEffect(() => {
+    if (section !== 'storage' || !webdav?.configured) return;
+    let active = true;
+    setWebdavListBusy(true);
+    call<WebdavBackup[]>('backup.webdav.list')
+      .then((items) => {
+        if (active) setWebdavBackups(items);
+      })
+      .catch(() => {
+        if (active) setWebdavBackups([]);
+      })
+      .finally(() => {
+        if (active) setWebdavListBusy(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [section, webdav?.configured]);
 
   const saveCanvas = async () => {
     if (!canvasToken.trim()) return;
@@ -262,6 +295,75 @@ export function Settings() {
       return result;
     } catch {
       // toast already shown
+    }
+  };
+
+  const exportEncrypted = async () => {
+    if ([...localPassphrase].length < 8) {
+      toast.error('加密口令至少 8 个字符');
+      return;
+    }
+    try {
+      const target = await toast
+        .promise(call<string | null>('app.exportBackupEncrypted', localPassphrase), {
+          loading: '正在加密导出…',
+          success: (value) => (value ? `已导出到 ${value}` : '已取消导出'),
+          error: (error) => (error instanceof Error ? error.message : '导出失败'),
+        })
+        .unwrap();
+      if (target) setLocalPassphrase('');
+    } catch {
+      // toast already shown
+    }
+  };
+
+  const pickLocalBackup = async () => {
+    try {
+      const path = await call<string>('app.chooseBackup');
+      if (path) setPendingImport({ kind: 'local', path });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '无法选择备份文件');
+    }
+  };
+
+  const loadWebdavBackups = async () => {
+    setWebdavListBusy(true);
+    try {
+      setWebdavBackups(await call<WebdavBackup[]>('backup.webdav.list'));
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '读取 WebDAV 备份列表失败');
+    } finally {
+      setWebdavListBusy(false);
+    }
+  };
+
+  const runImport = async () => {
+    const target = pendingImport;
+    if (!target) return;
+    if (target.kind === 'webdav' && [...restorePassphrase].length < 8) {
+      toast.error('请输入 WebDAV 备份的加密口令（至少 8 个字符）');
+      return;
+    }
+    if (target.kind === 'local' && /\.hivebackup$/i.test(target.path) && [...localPassphrase].length < 8) {
+      toast.error('该备份已加密，请在「加密口令」中填写导出时设置的口令');
+      return;
+    }
+    setImporting(true);
+    try {
+      const summary =
+        target.kind === 'webdav'
+          ? await call<{ name: string }>('backup.webdav.restore', target.name, restorePassphrase)
+          : await call<{ name: string }>('app.importBackup', target.path, localPassphrase);
+      setPendingImport(null);
+      setRestoredName(summary?.name ?? (target.kind === 'webdav' ? target.name : '本地备份'));
+      setLocalPassphrase('');
+      setRestorePassphrase('');
+      refreshAccounts();
+      if (webdav?.configured) void loadWebdavBackups();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '导入失败');
+    } finally {
+      setImporting(false);
     }
   };
 
@@ -809,7 +911,7 @@ export function Settings() {
                     }
                   />
                 </Section>
-                <Section title="备份" description="自动备份数据库与登录凭据；导出的压缩包用于迁移。">
+                <Section title="备份" description="自动备份数据库与登录凭据；加密包可在换机后完整恢复。">
                   <Row
                     label="自动备份"
                     description="每 15 分钟保存到本机；数据目录缺失时，应用启动会自动恢复最近一次备份。"
@@ -817,8 +919,7 @@ export function Settings() {
                   />
                   <Row
                     label="导出本地数据"
-                    description="生成一个压缩包，方便迁移到另一台电脑后重新登录。"
-                    last
+                    description="生成不含登录凭据的 .zip，换机后需要重新登录各服务。"
                     control={
                       <Button
                         size="sm"
@@ -835,6 +936,33 @@ export function Settings() {
                       </Button>
                     }
                   />
+                  <div className="p-4">
+                    <div className="text-xs font-medium text-ink">加密备份与导入</div>
+                    <p className="mt-1 text-[0.68rem] leading-relaxed text-ink-3">
+                      加密导出会生成包含登录凭据的 *.hivebackup，并用下方口令加密。导入支持 .zip 与
+                      *.hivebackup，会覆盖当前数据库、设置与登录凭据；导入前会自动保存一份本机快照。
+                    </p>
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <Input
+                        type="password"
+                        value={localPassphrase}
+                        onChange={(event) => setLocalPassphrase(event.target.value)}
+                        placeholder="加密口令（至少 8 位，不保存）"
+                        className="min-w-[14rem] flex-1"
+                      />
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => void exportEncrypted()}
+                        disabled={localPassphrase.length < 8}
+                      >
+                        <Download className="size-3.5" /> 加密导出
+                      </Button>
+                      <Button size="sm" onClick={() => void pickLocalBackup()}>
+                        <Import className="size-3.5" /> 导入备份
+                      </Button>
+                    </div>
+                  </div>
                 </Section>
                 <Section
                   title="WebDAV 备份"
@@ -935,6 +1063,58 @@ export function Settings() {
                         生成 `*.hivebackup` 文件后通过 WebDAV PUT 上传；包内包含数据库、设置、项目列表与登录凭据（jAccount
                         Cookie、邮箱密码、Canvas Token、水源 API Key 等），整个文件已用口令加密。
                       </p>
+                    </div>
+                    <div className="border-t border-line pt-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="text-xs font-medium text-ink">从 WebDAV 恢复</div>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => void loadWebdavBackups()}
+                          disabled={webdavListBusy}
+                        >
+                          <RefreshCw className={cn('size-3.5', webdavListBusy && 'animate-spin')} /> 刷新列表
+                        </Button>
+                      </div>
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <Input
+                          type="password"
+                          value={restorePassphrase}
+                          onChange={(event) => setRestorePassphrase(event.target.value)}
+                          placeholder="该备份的加密口令（至少 8 个字符）"
+                          className="min-w-[16rem] flex-1"
+                        />
+                      </div>
+                      <div className="mt-2 space-y-1.5">
+                        {webdavBackups.length === 0 ? (
+                          <p className="text-[0.64rem] leading-relaxed text-ink-3">
+                            {webdavListBusy ? '正在读取远程备份列表…' : '远程目录中没有找到 *.hivebackup 备份。'}
+                          </p>
+                        ) : (
+                          webdavBackups.map((item) => (
+                            <div
+                              key={item.name}
+                              className="flex items-center gap-3 rounded-lg border border-line bg-surface-2 px-3 py-2"
+                            >
+                              <div className="min-w-0 flex-1">
+                                <div className="truncate text-[0.7rem] font-medium text-ink">{item.name}</div>
+                                <div className="text-[0.62rem] text-ink-3">
+                                  {formatBytes(item.size)}
+                                  {item.modifiedAt ? ` · ${item.modifiedAt}` : ''}
+                                </div>
+                              </div>
+                              <Button
+                                size="sm"
+                                variant="secondary"
+                                disabled={restorePassphrase.length < 8}
+                                onClick={() => setPendingImport({ kind: 'webdav', name: item.name })}
+                              >
+                                <CloudDownload className="size-3.5" /> 恢复
+                              </Button>
+                            </div>
+                          ))
+                        )}
+                      </div>
                     </div>
                   </div>
                 </Section>
@@ -1173,6 +1353,48 @@ export function Settings() {
                 保存 Cookie
               </Button>
             </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={pendingImport !== null} onOpenChange={(open) => !open && !importing && setPendingImport(null)}>
+        <DialogContent
+          title="确认导入备份"
+          description="导入会覆盖当前数据库、设置和登录凭据。导入前会自动保存一份本机快照，可在数据目录的 backups 文件夹找回。"
+          footer={
+            <>
+              <Button variant="ghost" onClick={() => setPendingImport(null)} disabled={importing}>
+                取消
+              </Button>
+              <Button variant="primary" onClick={() => void runImport()} disabled={importing}>
+                <Import className="size-4" /> {importing ? '正在导入…' : '开始导入'}
+              </Button>
+            </>
+          }
+        >
+          <div className="break-all rounded-lg border border-line bg-surface-2 p-3 text-xs text-ink-2">
+            {pendingImport?.kind === 'webdav' ? pendingImport.name : pendingImport?.path}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={restoredName !== null} onOpenChange={(open) => !open && setRestoredName(null)}>
+        <DialogContent
+          title="备份已恢复"
+          description="数据已写入本机。重启应用后，所有模块会使用恢复后的登录凭据与设置重新连接。"
+          footer={
+            <>
+              <Button variant="ghost" onClick={() => setRestoredName(null)}>
+                稍后重启
+              </Button>
+              <Button variant="primary" onClick={() => void call('app.restart')}>
+                <RotateCcw className="size-4" /> 立即重启
+              </Button>
+            </>
+          }
+        >
+          <div className="break-all rounded-lg border border-line bg-surface-2 p-3 text-xs text-ink-2">
+            {restoredName}
           </div>
         </DialogContent>
       </Dialog>

@@ -117,6 +117,40 @@ func (s *SecretStore) Exists(name string) bool {
 	return err == nil
 }
 
+// ReplaceAll swaps the stored secrets for a restored backup. Names listed in
+// keep (for example the WebDAV config used to download that backup) survive.
+func (s *SecretStore) ReplaceAll(values map[string]json.RawMessage, keep ...string) error {
+	entries, err := os.ReadDir(s.dir)
+	if err != nil {
+		return err
+	}
+	preserve := make(map[string]bool, len(keep))
+	for _, name := range keep {
+		preserve[name] = true
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".bin") {
+			continue
+		}
+		name := strings.TrimSuffix(entry.Name(), ".bin")
+		if preserve[name] {
+			continue
+		}
+		if err := os.Remove(filepath.Join(s.dir, entry.Name())); err != nil {
+			return err
+		}
+	}
+	for name, value := range values {
+		if preserve[name] || len(value) == 0 {
+			continue
+		}
+		if err := s.SaveRaw(name, value); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // ExportPlain decrypts every stored secret for inclusion in an encrypted backup.
 func (s *SecretStore) ExportPlain(exclude ...string) (map[string]json.RawMessage, error) {
 	entries, err := os.ReadDir(s.dir)

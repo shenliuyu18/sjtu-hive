@@ -276,6 +276,28 @@ func (s *CampusSession) Replace(cookies []cookieRecord) {
 	s.emitStatus()
 }
 
+// Reload swaps the in-memory cookies for the stored ones, used after a backup
+// restore replaced the secret store.
+func (s *CampusSession) Reload() {
+	var snapshot campusSnapshot
+	ok, err := s.secrets.Load("campus-session", &snapshot)
+	if err != nil && s.logger != nil {
+		s.logger.Warn("reload campus session", "error", err)
+	}
+	s.mu.Lock()
+	s.cookies = make(map[string]cookieRecord)
+	if ok {
+		for _, cookie := range snapshot.Cookies {
+			s.cookies[cookieKey(cookie)] = cookie
+		}
+		s.updatedAt = snapshot.UpdatedAt
+	} else {
+		s.updatedAt = ""
+	}
+	s.mu.Unlock()
+	s.emitStatus()
+}
+
 func (s *CampusSession) Clear() {
 	s.mu.Lock()
 	s.cookies = make(map[string]cookieRecord)
