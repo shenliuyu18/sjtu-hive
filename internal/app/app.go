@@ -256,7 +256,7 @@ func (a *App) registerServices() {
 	a.cloudPan.Register(a.router)
 	a.course = NewCourseCommunity(a.secrets)
 	a.course.Register(a.router)
-	a.share = NewShare(a.secrets)
+	a.share = NewShare(a.secrets, a.campus)
 	a.share.Register(a.router)
 	a.router.Handle("share.save", func(args []json.RawMessage) (any, error) {
 		id, err := DecodeArg[int64](args, 0)

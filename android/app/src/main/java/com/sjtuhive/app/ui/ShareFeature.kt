@@ -52,6 +52,7 @@ fun ShareScreen(context: Context, onClose: () -> Unit) {
     val api = remember { ShareApi(context) }
     val scope = rememberCoroutineScope()
     var loggedIn by remember { mutableStateOf(api.loggedIn()) }
+    var autoLoggingIn by remember { mutableStateOf(!api.loggedIn()) }
     var showLogin by remember { mutableStateOf(false) }
     var keyword by remember { mutableStateOf("") }
     var courses by remember { mutableStateOf<List<ShareCourse>>(emptyList()) }
@@ -69,6 +70,26 @@ fun ShareScreen(context: Context, onClose: () -> Unit) {
             loggedIn = false
         }
         error = cause.message ?: "读取失败"
+    }
+
+    fun autoLogin() {
+        scope.launch {
+            autoLoggingIn = true
+            error = null
+            runCatching { api.loginWithCampus() }
+                .onSuccess { token ->
+                    api.saveToken(token)
+                    loggedIn = true
+                }
+                .onFailure {
+                    error = it.message ?: "请先在设置中登录 jAccount"
+                }
+            autoLoggingIn = false
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        if (!loggedIn) autoLogin()
     }
 
     fun search() {
@@ -251,13 +272,23 @@ fun ShareScreen(context: Context, onClose: () -> Unit) {
                     .padding(24.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
-                Text("登录传承交大", style = MaterialTheme.typography.headlineSmall)
-                Text(
-                    "使用 jAccount 登录 share.dyweb.sjtu.cn。登录在应用内 WebView 中完成，站点令牌只保存在本机。",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Button(onClick = { showLogin = true }) { Text("使用 jAccount 登录") }
+                Text("传承交大", style = MaterialTheme.typography.headlineSmall)
+                if (autoLoggingIn) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        CircularProgressIndicator()
+                        Text("正在复用设置中的 jAccount 登录…")
+                    }
+                } else {
+                    Text(
+                        error ?: "传承交大使用 jAccount。只需在设置中登录一次，之后这里会自动复用。",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Button(onClick = { autoLogin() }, modifier = Modifier.fillMaxWidth()) {
+                        Text("重试自动登录")
+                    }
+                    TextButton(onClick = { showLogin = true }) { Text("手动打开登录窗口") }
+                }
             }
             return@Column
         }

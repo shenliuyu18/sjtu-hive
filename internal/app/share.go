@@ -23,6 +23,7 @@ var errShareAuth = errors.New("传承交大登录已失效，请重新登录")
 
 type Share struct {
 	secrets *SecretStore
+	campus  *CampusSession
 
 	mu    sync.Mutex
 	token string
@@ -32,8 +33,8 @@ type shareState struct {
 	LoggedIn bool `json:"loggedIn"`
 }
 
-func NewShare(secrets *SecretStore) *Share {
-	service := &Share{secrets: secrets}
+func NewShare(secrets *SecretStore, campus *CampusSession) *Share {
+	service := &Share{secrets: secrets, campus: campus}
 	var saved struct {
 		Token string `json:"token"`
 	}
@@ -50,10 +51,29 @@ func (s *Share) State() shareState {
 }
 
 func (s *Share) Login(ctx context.Context) (shareState, error) {
+	if token, err := s.loginWithCampus(ctx); err == nil {
+		return s.storeToken(token)
+	}
 	token, err := loginShareToken(ctx)
 	if err != nil {
 		return shareState{}, err
 	}
+	return s.storeToken(token)
+}
+
+// LoginSilent reuses the jAccount session saved from Settings without user input.
+func (s *Share) LoginSilent(ctx context.Context) (shareState, error) {
+	if s.State().LoggedIn {
+		return shareState{LoggedIn: true}, nil
+	}
+	token, err := s.loginWithCampus(ctx)
+	if err != nil {
+		return shareState{}, err
+	}
+	return s.storeToken(token)
+}
+
+func (s *Share) storeToken(token string) (shareState, error) {
 	token = strings.TrimSpace(token)
 	if token == "" {
 		return shareState{}, errors.New("没有读取到传承交大登录凭据")
@@ -257,6 +277,11 @@ func (s *Share) Register(router *Router) {
 		ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 		defer cancel()
 		return s.Login(ctx)
+	})
+	router.Handle("share.loginSilent", func([]json.RawMessage) (any, error) {
+		ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
+		defer cancel()
+		return s.LoginSilent(ctx)
 	})
 	router.Handle("share.logout", func([]json.RawMessage) (any, error) {
 		return s.Logout(), nil

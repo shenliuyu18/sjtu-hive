@@ -3,6 +3,10 @@ package com.sjtuhive.app.data
 import android.content.Context
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.Cookie
+import okhttp3.CookieJar
+import okhttp3.HttpUrl
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -10,6 +14,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 
 data class ShareCourse(val id: Long, val name: String, val subtitle: String)
@@ -25,10 +30,37 @@ data class ShareMaterial(
     val isMine: Boolean,
 )
 
+private class ShareOAuthJar : CookieJar {
+    private val store = mutableMapOf<String, MutableList<Cookie>>()
+
+    fun seed(host: String, cookies: List<Cookie>) {
+        store[host] = cookies.toMutableList()
+    }
+
+    override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) {
+        if (cookies.isEmpty()) return
+        val current = store.getOrPut(url.host) { mutableListOf() }
+        cookies.forEach { cookie ->
+            current.removeAll { it.name == cookie.name }
+            current += cookie
+        }
+    }
+
+    override fun loadForRequest(url: HttpUrl): List<Cookie> = store[url.host].orEmpty()
+}
+
 /** 传承交大（share.dyweb.sjtu.cn）只读客户端；token 由 WebView 登录流程写入。 */
 class ShareApi(private val context: Context) {
     private val prefs = context.getSharedPreferences("hive_share", Context.MODE_PRIVATE)
     private val client = OkHttpClient.Builder()
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(25, TimeUnit.SECONDS)
+        .build()
+    private val oauthJar = ShareOAuthJar()
+    private val oauthClient = OkHttpClient.Builder()
+        .followRedirects(false)
+        .followSslRedirects(false)
+        .cookieJar(oauthJar)
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(25, TimeUnit.SECONDS)
         .build()
@@ -43,6 +75,91 @@ class ShareApi(private val context: Context) {
 
     fun logout() {
         prefs.edit().remove("token").apply()
+    }
+
+    /** 用设置里保存的 jAccount Cookie 走一次 OAuth，完全静默地拿到站点令牌。 */
+    suspend fun loginWithCampus(): String = withContext(Dispatchers.IO) {
+        val jaccountCookies = HiveSession.store(context)["jaccount.sjtu.edu.cn"].orEmpty()
+        if (jaccountCookies.isEmpty()) throw IllegalStateException("请先在设置中登录 jAccount")
+        val seeded = jaccountCookies.mapNotNull { (name, value) ->
+            runCatching {
+                Cookie.Builder()
+                    .name(name)
+                    .value(value)
+                    .domain("jaccount.sjtu.edu.cn")
+                    .path("/")
+                    .secure()
+                    .httpOnly()
+                    .build()
+            }.getOrNull()
+        }
+        oauthJar.seed("jaccount.sjtu.edu.cn", seeded)
+
+        val callback = "https://share.dyweb.sjtu.cn/auth/jaccount/callback"
+        val configUrl = "$BASE/auth/jaccount/config?redirect_uri=" + URLEncoder.encode(callback, "UTF-8")
+        val config = oauthJson(configUrl)
+        if (!config.optBoolean("success", false)) throw IllegalStateException("读取 jAccount 登录配置失败")
+        val data = config.optJSONObject("data") ?: throw IllegalStateException("jAccount 登录配置不完整")
+        val endpoint = data.optJSONObject("endpoint")?.optString("auth_url").orEmpty()
+        val clientId = data.optString("client_id")
+        val state = data.optString("state")
+        val redirectUri = data.optString("redirect_uri").ifBlank { callback }
+        if (endpoint.isBlank() || clientId.isBlank() || state.isBlank()) {
+            throw IllegalStateException("jAccount 登录配置不完整")
+        }
+        val scopes = data.optJSONArray("scopes")?.let { array ->
+            (0 until array.length()).mapNotNull { array.optString(it).takeIf(String::isNotBlank) }
+        }.orEmpty()
+        val base = endpoint.toHttpUrlOrNull() ?: throw IllegalStateException("jAccount 地址无效")
+        var current = base.newBuilder()
+            .addQueryParameter("client_id", clientId)
+            .addQueryParameter("redirect_uri", redirectUri)
+            .addQueryParameter("response_type", "code")
+            .addQueryParameter("scope", scopes.joinToString(" "))
+            .addQueryParameter("state", state)
+            .build()
+
+        var code = ""
+        for (step in 0 until 15) {
+            val response = oauthClient.newCall(
+                Request.Builder().url(current).header("User-Agent", USER_AGENT).build(),
+            ).execute()
+            response.use {
+                val location = it.header("Location")
+                    ?: throw IllegalStateException("设置中的 jAccount 登录已失效，请先在设置中重新登录")
+                val next = current.resolve(location) ?: throw IllegalStateException("jAccount 返回了无效地址")
+                if (next.scheme != "https" || next.host !in OAUTH_HOSTS) {
+                    throw IllegalStateException("jAccount 跳转到了不受信任的地址")
+                }
+                current = next
+                if (current.toString().startsWith(callback)) {
+                    code = current.queryParameter("code").orEmpty()
+                    val returnedState = current.queryParameter("state")
+                    if (!returnedState.isNullOrBlank() && returnedState != state) {
+                        throw IllegalStateException("jAccount 登录状态校验失败")
+                    }
+                    break
+                }
+            }
+        }
+        if (code.isBlank()) throw IllegalStateException("jAccount 没有返回授权码，请先在设置中重新登录")
+
+        val authorizeUrl = "$BASE/auth/jaccount/authorize?code=" +
+            URLEncoder.encode(code, "UTF-8") + "&state=" + URLEncoder.encode(state, "UTF-8")
+        val authorize = oauthJson(authorizeUrl)
+        if (!authorize.optBoolean("success", false)) throw IllegalStateException("jAccount 授权失败")
+        val token = authorize.opt("data") as? String
+        if (token.isNullOrBlank()) throw IllegalStateException("jAccount 授权没有返回有效登录信息")
+        token.trim()
+    }
+
+    private fun oauthJson(url: String): JSONObject {
+        val target = url.toHttpUrlOrNull() ?: throw IllegalStateException("jAccount 地址无效")
+        oauthClient.newCall(Request.Builder().url(target).header("User-Agent", USER_AGENT).build()).execute().use { response ->
+            val text = response.body?.string().orEmpty()
+            if (!response.isSuccessful) throw IllegalStateException("jAccount 请求失败：HTTP ${response.code}")
+            return JSONObject(text)
+        }
     }
 
     suspend fun searchCourses(keyword: String): List<ShareCourse> = withContext(Dispatchers.IO) {
@@ -218,6 +335,8 @@ class ShareApi(private val context: Context) {
 
     private companion object {
         const val BASE = "https://api-v2.share.dyweb.sjtu.cn"
+        const val USER_AGENT = "SJTU-Hive/Android"
+        val OAUTH_HOSTS = setOf("jaccount.sjtu.edu.cn", "share.dyweb.sjtu.cn", "api-v2.share.dyweb.sjtu.cn")
         val JSON = "application/json; charset=utf-8".toMediaType()
     }
 }

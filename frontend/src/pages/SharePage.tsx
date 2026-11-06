@@ -103,6 +103,8 @@ function fileNameOf(value: unknown): string {
 export function SharePage() {
   const [state, setState] = useState<ShareState | null>(null);
   const [loginBusy, setLoginBusy] = useState(false);
+  const [autoTrying, setAutoTrying] = useState(false);
+  const [autoError, setAutoError] = useState('');
   const [banners, setBanners] = useState<JsonObject[]>([]);
   const [keyword, setKeyword] = useState('');
   const [courses, setCourses] = useState<JsonObject[]>([]);
@@ -135,12 +137,46 @@ export function SharePage() {
   }, []);
 
   useEffect(() => {
-    void call<ShareState>('share.state')
-      .then((value) => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const value = await call<ShareState>('share.state');
+        if (cancelled) return;
         setState(value);
-        if (value?.loggedIn) void loadBanners();
-      })
-      .catch(() => setState({ loggedIn: false }));
+        if (value?.loggedIn) {
+          void loadBanners();
+          return;
+        }
+        const campus = await call<{ connected?: boolean }>('campus.status').catch(() => null);
+        if (cancelled) return;
+        if (!campus?.connected) {
+          setAutoError('请先在“设置 → 校园登录”中登录 jAccount；登录一次后，这里会自动复用。');
+          return;
+        }
+        setAutoTrying(true);
+        try {
+          const next = await call<ShareState>('share.loginSilent');
+          if (cancelled) return;
+          setState(next);
+          if (next?.loggedIn) {
+            setAutoError('');
+            toast.success('已复用设置中的 jAccount 登录');
+            void loadBanners();
+          }
+        } catch (cause) {
+          if (!cancelled) {
+            setAutoError(cause instanceof Error ? cause.message : '自动登录失败，请重试');
+          }
+        } finally {
+          if (!cancelled) setAutoTrying(false);
+        }
+      } catch {
+        if (!cancelled) setState({ loggedIn: false });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -156,6 +192,23 @@ export function SharePage() {
       toast.error(cause instanceof Error ? cause.message : '登录失败', { id: toastId });
     } finally {
       setLoginBusy(false);
+    }
+  };
+
+  const retryAutoLogin = async () => {
+    setAutoError('');
+    setAutoTrying(true);
+    try {
+      const next = await call<ShareState>('share.loginSilent');
+      setState(next);
+      if (next?.loggedIn) {
+        toast.success('已复用设置中的 jAccount 登录');
+        void loadBanners();
+      }
+    } catch (cause) {
+      setAutoError(cause instanceof Error ? cause.message : '自动登录失败，请重试');
+    } finally {
+      setAutoTrying(false);
     }
   };
 
@@ -301,15 +354,33 @@ export function SharePage() {
       <div className="flex h-full items-center justify-center p-6">
         <Card className="w-full max-w-md p-6">
           <div className="mb-1 flex items-center gap-2 text-sm font-semibold text-ink">
-            <Share2 className="size-4 text-accent" /> 登录传承交大
+            <Share2 className="size-4 text-accent" /> 传承交大
           </div>
-          <p className="mb-5 text-[0.7rem] leading-relaxed text-ink-3">
-            使用 jAccount 登录 share.dyweb.sjtu.cn。点击登录后会打开独立 Edge 窗口，完成登录后应用会保存站点令牌。
-          </p>
-          <Button className="w-full" onClick={() => void login()} disabled={loginBusy}>
-            {loginBusy ? <Spinner /> : null}
-            {loginBusy ? '等待 jAccount 登录…' : '使用 jAccount 登录'}
-          </Button>
+          {autoTrying ? (
+            <div className="flex items-center gap-2 py-6 text-xs text-ink-3">
+              <Spinner /> 正在复用“设置 → 校园登录”中的 jAccount…
+            </div>
+          ) : (
+            <>
+              <p className="mb-5 text-[0.7rem] leading-relaxed text-ink-3">
+                {autoError ||
+                  '传承交大使用 jAccount。只需在设置中登录一次，之后会在这里自动复用，不再单独要求登录。'}
+              </p>
+              <div className="space-y-2">
+                <Button className="w-full" onClick={() => void retryAutoLogin()} disabled={loginBusy}>
+                  重试自动登录
+                </Button>
+                <Button
+                  className="w-full"
+                  variant="ghost"
+                  onClick={() => void login()}
+                  disabled={loginBusy}
+                >
+                  {loginBusy ? '等待 jAccount 登录…' : '手动打开登录窗口'}
+                </Button>
+              </div>
+            </>
+          )}
         </Card>
       </div>
     );
