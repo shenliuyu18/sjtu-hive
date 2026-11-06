@@ -123,7 +123,7 @@ export function Onboarding() {
               })}
             </div>
             <div className="selectable max-h-40 overflow-y-auto rounded-lg border border-line bg-surface-2 p-3 text-[0.68rem] leading-relaxed text-ink-3">
-              使用本应用即表示你同意：本应用与上海交通大学及 Dela 作者无隶属关系；校园接口可能随学校系统调整；
+              使用本应用即表示你同意：本应用与上海交通大学无隶属关系；校园接口可能随学校系统调整；
               不提供自动选课、场馆预约或批量抢资源功能；重要笔记请自行备份。账号 Token、邮箱密码与 Cookie
               使用 Windows DPAPI 加密保存在本机，不会上传到任何服务器。
             </div>
@@ -136,7 +136,7 @@ export function Onboarding() {
         ) : (
           <div className="space-y-3">
             <div className="rounded-lg border border-line bg-surface-2 p-3 text-[0.68rem] leading-relaxed text-ink-3">
-              这些步骤都可以跳过，之后在「设置 → 账户与连接」里随时配置。应用不会读取你已安装的 Dela 的凭据或数据。
+              这些步骤都可以跳过，之后在「设置 → 账户与连接」里随时配置。应用不会读取其他客户端的凭据或数据。
             </div>
             {[
               { icon: KeyRound, title: 'Canvas', text: '粘贴个人 Access Token，同步课程资料与作业。' },
