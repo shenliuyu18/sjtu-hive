@@ -103,7 +103,7 @@ class ShareApi(private val context: Context) {
     suspend fun downloadToCache(id: Long, fileName: String): File = withContext(Dispatchers.IO) {
         val url = download(id)
         if (url.isBlank()) throw IllegalStateException("没有获取到下载链接")
-        val safeName = fileName.ifBlank { "share-$id" }
+        val safeName = safeShareFileName(fileName, "share-$id")
         val directory = File(context.cacheDir, "share").apply { mkdirs() }
         val target = File(directory, "${id}-$safeName")
         if (target.exists() && target.length() > 0) return@withContext target
@@ -223,6 +223,13 @@ class ShareApi(private val context: Context) {
 }
 
 class ShareAuthException(message: String) : Exception(message)
+
+internal fun safeShareFileName(name: String, fallback: String): String {
+    val cleaned = name.trim()
+        .replace(Regex("[\\\\/:*?\"<>|\\p{Cntrl}]"), "_")
+        .trim('.', ' ')
+    return cleaned.ifBlank { fallback }.take(140)
+}
 
 private fun shareErrorMessage(message: String): String = when (message.trim()) {
     "you have not purchase the material!" -> "该资料需要先兑换或领取后才能下载"

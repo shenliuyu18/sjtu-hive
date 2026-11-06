@@ -43,6 +43,7 @@ import com.sjtuhive.app.data.ShareApi
 import com.sjtuhive.app.data.ShareAuthException
 import com.sjtuhive.app.data.ShareCourse
 import com.sjtuhive.app.data.ShareMaterial
+import com.sjtuhive.app.data.safeShareFileName
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -130,7 +131,7 @@ fun ShareScreen(context: Context, onClose: () -> Unit) {
     }
 
     fun openFile(material: ShareMaterial) {
-        val fileName = material.fileName.ifBlank { material.title }
+        val fileName = safeShareFileName(material.fileName, material.title.ifBlank { "share-${material.id}" })
         PreviewHost.open(
             PreviewRequest(
                 title = material.title,
@@ -155,7 +156,7 @@ fun ShareScreen(context: Context, onClose: () -> Unit) {
                         error = "没有获取到下载链接"
                     } else {
                         runCatching {
-                            startDownload(context, url, material.fileName.ifBlank { material.title })
+                            startDownload(context, url, safeShareFileName(material.fileName, material.title.ifBlank { "share-${material.id}" }))
                             Toast.makeText(context, "已开始下载到系统下载目录", Toast.LENGTH_SHORT).show()
                         }.onFailure { error = it.message ?: "下载失败" }
                     }
