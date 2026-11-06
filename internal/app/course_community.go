@@ -127,6 +127,12 @@ type CourseList struct {
 	PageSize int             `json:"page_size"`
 }
 
+type CourseEnrollment struct {
+	ID       int64         `json:"id"`
+	Semester string        `json:"semester"`
+	Course   CourseSummary `json:"course"`
+}
+
 type CourseReview struct {
 	ID              int64          `json:"id"`
 	CourseID        int64          `json:"course_id"`
@@ -479,6 +485,51 @@ func (c *CourseCommunity) Followed(ctx context.Context, page, pageSize int) (Cou
 	return result, err
 }
 
+func (c *CourseCommunity) Ignored(ctx context.Context, page, pageSize int) (CourseList, error) {
+	if page <= 0 {
+		page = 1
+	}
+	if pageSize <= 0 || pageSize > 50 {
+		pageSize = 10
+	}
+	values := url.Values{}
+	values.Set("page", strconv.Itoa(page))
+	values.Set("page_size", strconv.Itoa(pageSize))
+	data, err := c.do(ctx, http.MethodGet, "/course/ignored?"+values.Encode(), nil)
+	if err != nil {
+		return CourseList{}, err
+	}
+	var result CourseList
+	err = json.Unmarshal(data, &result)
+	return result, err
+}
+
+func (c *CourseCommunity) Enrolled(ctx context.Context) ([]CourseEnrollment, error) {
+	data, err := c.do(ctx, http.MethodGet, "/course/enrolled", nil)
+	if err != nil {
+		return nil, err
+	}
+	var items []CourseEnrollment
+	if json.Unmarshal(data, &items) == nil {
+		return items, nil
+	}
+	var page CourseList
+	if err := json.Unmarshal(data, &page); err == nil && page.Items != nil {
+		items = make([]CourseEnrollment, 0, len(page.Items))
+		for _, course := range page.Items {
+			items = append(items, CourseEnrollment{Course: course, Semester: course.LastSemester})
+		}
+		return items, nil
+	}
+	var wrapped struct {
+		Items []CourseEnrollment `json:"items"`
+	}
+	if err := json.Unmarshal(data, &wrapped); err != nil {
+		return nil, err
+	}
+	return wrapped.Items, nil
+}
+
 func (c *CourseCommunity) ReviewFilters(ctx context.Context, id int64) (CourseReviewFilter, error) {
 	data, err := c.do(ctx, http.MethodGet, fmt.Sprintf("/course/%d/review/filter", id), nil)
 	if err != nil {
@@ -569,6 +620,18 @@ func (c *CourseCommunity) Register(router *Router) {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		return c.Followed(ctx, page, pageSize)
+	})
+	router.Handle("course.ignored", func(args []json.RawMessage) (any, error) {
+		page, _, _ := DecodeOptionalArg[int](args, 0)
+		pageSize, _, _ := DecodeOptionalArg[int](args, 1)
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		return c.Ignored(ctx, page, pageSize)
+	})
+	router.Handle("course.enrolled", func([]json.RawMessage) (any, error) {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		return c.Enrolled(ctx)
 	})
 	router.Handle("course.reviewFilters", func(args []json.RawMessage) (any, error) {
 		id, err := DecodeArg[int64](args, 0)

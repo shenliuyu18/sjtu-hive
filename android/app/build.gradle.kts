@@ -18,8 +18,8 @@ android {
         applicationId = "com.sjtuhive.app"
         minSdk = 33
         targetSdk = 37
-        versionCode = 9
-        versionName = "1.2.0-beta.5"
+        versionCode = 10
+        versionName = "1.2.0-beta.6"
     }
 
     buildFeatures { compose = true }

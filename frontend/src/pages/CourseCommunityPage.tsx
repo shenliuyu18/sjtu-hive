@@ -31,6 +31,7 @@ type CourseFilters = {
   semesters: { name: string; count: number }[];
 };
 type CourseList = { items: CourseSummary[]; total: number; page: number; page_size: number };
+type CourseEnrollment = { id: number; semester: string; course: CourseSummary };
 type CourseDetail = CourseSummary & {
   moderator_remark: string;
   offered_courses: { semester: string; language: string; target_years: string[] }[];
@@ -223,9 +224,12 @@ export function CourseCommunityPage() {
   const [hot, setHot] = useState<CourseHot | null>(null);
   const [filters, setFilters] = useState<CourseFilters | null>(null);
   const [homeReviews, setHomeReviews] = useState<ReviewList | null>(null);
-  const [followed, setFollowed] = useState<CourseSummary[]>([]);
   const [mode, setMode] = useState<'home' | 'search' | 'mine'>('home');
   const [mine, setMine] = useState<CourseList | null>(null);
+  const [ignored, setIgnored] = useState<CourseList | null>(null);
+  const [enrollments, setEnrollments] = useState<CourseEnrollment[]>([]);
+  const [mineTab, setMineTab] = useState<'enrolled' | 'followed' | 'ignored'>('enrolled');
+  const [mineSemester, setMineSemester] = useState('');
   const [mineLoading, setMineLoading] = useState(false);
   const [list, setList] = useState<CourseList | null>(null);
   const [query, setQuery] = useState('');
@@ -239,12 +243,34 @@ export function CourseCommunityPage() {
   const [selectedId, setSelectedId] = useState<number | null>(null);
 
   const loadHome = useCallback(async () => {
-    const [reviewResult, followedResult] = await Promise.allSettled([
+    const [reviewResult, enrolledResult] = await Promise.allSettled([
       call<ReviewList>('course.recentReviews', 1, 20),
-      call<CourseList>('course.followed', 1, 10),
+      call<CourseEnrollment[]>('course.enrolled'),
     ]);
     if (reviewResult.status === 'fulfilled') setHomeReviews(reviewResult.value);
-    if (followedResult.status === 'fulfilled') setFollowed(followedResult.value?.items ?? []);
+    if (enrolledResult.status === 'fulfilled') setEnrollments(enrolledResult.value ?? []);
+  }, []);
+
+  const loadEnrolled = useCallback(async () => {
+    setMineLoading(true);
+    try {
+      setEnrollments(await call<CourseEnrollment[]>('course.enrolled'));
+    } catch (cause) {
+      toast.error(cause instanceof Error ? cause.message : '读取选课记录失败');
+    } finally {
+      setMineLoading(false);
+    }
+  }, []);
+
+  const loadIgnored = useCallback(async (nextPage = 1) => {
+    setMineLoading(true);
+    try {
+      setIgnored(await call<CourseList>('course.ignored', nextPage, 20));
+    } catch (cause) {
+      toast.error(cause instanceof Error ? cause.message : '读取屏蔽课程失败');
+    } finally {
+      setMineLoading(false);
+    }
   }, []);
 
   const loadMine = useCallback(async (nextPage = 1) => {
@@ -369,17 +395,29 @@ export function CourseCommunityPage() {
     void loadHome();
   };
 
-  const openMine = () => {
+  const openMine = (tab: 'enrolled' | 'followed' | 'ignored' = 'enrolled') => {
     setMode('mine');
+    setMineTab(tab);
     setList(null);
     setDetail(null);
     setSelectedId(null);
     setReviews(null);
-    void loadMine(1);
+    setMineSemester('');
+    if (tab === 'enrolled') void loadEnrolled();
+    else if (tab === 'followed') void loadMine(1);
+    else void loadIgnored(1);
   };
 
   const departments = useMemo(() => filters?.departments ?? [], [filters]);
   const semesters = useMemo(() => filters?.semesters ?? [], [filters]);
+  const enrolledSemesters = useMemo(
+    () => [...new Set(enrollments.map((item) => item.semester).filter(Boolean))].sort().reverse(),
+    [enrollments],
+  );
+  const visibleEnrollments = useMemo(
+    () => (mineSemester ? enrollments.filter((item) => item.semester === mineSemester) : enrollments),
+    [enrollments, mineSemester],
+  );
 
   if (!state) {
     return (
@@ -533,52 +571,160 @@ export function CourseCommunityPage() {
                 <EmptyState icon={BookOpen} title="没有找到课程" description="换一个关键词或筛选条件试试。" />
               )
             ) : mode === 'mine' ? (
-              mineLoading && !mine ? (
-                <div className="flex h-32 items-center justify-center gap-2 text-xs text-ink-3">
-                  <Spinner /> 正在读取我的课程…
-                </div>
-              ) : mine?.items?.length ? (
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <div className="text-sm font-semibold text-ink">我的课程</div>
-                    <span className="text-[0.64rem] text-ink-3">
-                      共 {mine.total} 门 · 第 {mine.page} 页
-                    </span>
-                  </div>
-                  {mine.items.map((course) => (
-                    <CourseCard
-                      key={course.id}
-                      course={course}
-                      active={selectedId === course.id}
-                      onClick={() => void openCourse(course)}
-                    />
+              <div className="space-y-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  {(
+                    [
+                      ['enrolled', '选课记录'],
+                      ['followed', '已关注'],
+                      ['ignored', '已屏蔽'],
+                    ] as const
+                  ).map(([value, label]) => (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => {
+                        setMineTab(value);
+                        setMineSemester('');
+                        setDetail(null);
+                        setSelectedId(null);
+                        if (value === 'enrolled') void loadEnrolled();
+                        else if (value === 'followed') void loadMine(1);
+                        else void loadIgnored(1);
+                      }}
+                      className={cn(
+                        'rounded-full border px-3 py-1 text-[0.68rem] transition-colors',
+                        mineTab === value
+                          ? 'border-accent/50 bg-accent/10 text-accent'
+                          : 'border-line bg-surface text-ink-3 hover:text-ink',
+                      )}
+                    >
+                      {label}
+                    </button>
                   ))}
-                  <div className="mt-3 flex items-center justify-end gap-2 text-[0.66rem] text-ink-3">
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      disabled={mineLoading || mine.page <= 1}
-                      onClick={() => void loadMine(mine.page - 1)}
+                  {mineTab === 'enrolled' && enrolledSemesters.length ? (
+                    <select
+                      value={mineSemester}
+                      onChange={(event) => setMineSemester(event.target.value)}
+                      className="h-8 rounded-lg border border-line bg-surface px-2 text-[0.68rem] text-ink"
                     >
-                      上一页
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      disabled={mineLoading || mine.page * mine.page_size >= mine.total}
-                      onClick={() => void loadMine(mine.page + 1)}
-                    >
-                      下一页
-                    </Button>
-                  </div>
+                      <option value="">全部学期</option>
+                      {enrolledSemesters.map((semester) => (
+                        <option key={semester} value={semester}>
+                          {semester}
+                        </option>
+                      ))}
+                    </select>
+                  ) : null}
                 </div>
-              ) : (
-                <EmptyState
-                  icon={BookOpen}
-                  title="还没有我的课程"
-                  description="在 course.sjtu.plus 关注课程后，会显示在这里。"
-                />
-              )
+                {mineTab === 'enrolled' ? (
+                  mineLoading && !enrollments.length ? (
+                    <div className="flex h-32 items-center justify-center gap-2 text-xs text-ink-3">
+                      <Spinner /> 正在读取选课记录…
+                    </div>
+                  ) : visibleEnrollments.length ? (
+                    <div className="space-y-2">
+                      <div className="text-[0.64rem] text-ink-3">
+                        共 {visibleEnrollments.length} 门
+                      </div>
+                      {visibleEnrollments.map((item) => (
+                        <div key={item.id}>
+                          <div className="mb-1 px-1 text-[0.62rem] text-ink-3">{item.semester}</div>
+                          <CourseCard
+                            course={item.course}
+                            active={selectedId === item.course.id}
+                            onClick={() => void openCourse(item.course)}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <EmptyState
+                      icon={BookOpen}
+                      title="暂无选课记录"
+                      description="可在 course.sjtu.plus 的“我的课程”中同步教学网选课记录。"
+                    />
+                  )
+                ) : mineTab === 'followed' ? (
+                  mineLoading && !mine ? (
+                    <div className="flex h-32 items-center justify-center gap-2 text-xs text-ink-3">
+                      <Spinner /> 正在读取关注课程…
+                    </div>
+                  ) : mine?.items?.length ? (
+                    <div className="space-y-2">
+                      <div className="text-[0.64rem] text-ink-3">
+                        共 {mine.total} 门 · 第 {mine.page} 页
+                      </div>
+                      {mine.items.map((course) => (
+                        <CourseCard
+                          key={course.id}
+                          course={course}
+                          active={selectedId === course.id}
+                          onClick={() => void openCourse(course)}
+                        />
+                      ))}
+                      <div className="mt-3 flex items-center justify-end gap-2 text-[0.66rem] text-ink-3">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          disabled={mineLoading || mine.page <= 1}
+                          onClick={() => void loadMine(mine.page - 1)}
+                        >
+                          上一页
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          disabled={mineLoading || mine.page * mine.page_size >= mine.total}
+                          onClick={() => void loadMine(mine.page + 1)}
+                        >
+                          下一页
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <EmptyState
+                      icon={BookOpen}
+                      title="暂无关注课程"
+                      description="在课程详情页关注课程后，会显示在这里。"
+                    />
+                  )
+                ) : ignored?.items?.length ? (
+                  <div className="space-y-2">
+                    <div className="text-[0.64rem] text-ink-3">
+                      共 {ignored.total} 门 · 第 {ignored.page} 页
+                    </div>
+                    {ignored.items.map((course) => (
+                      <CourseCard
+                        key={course.id}
+                        course={course}
+                        active={selectedId === course.id}
+                        onClick={() => void openCourse(course)}
+                      />
+                    ))}
+                    <div className="mt-3 flex items-center justify-end gap-2 text-[0.66rem] text-ink-3">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={mineLoading || ignored.page <= 1}
+                        onClick={() => void loadIgnored(ignored.page - 1)}
+                      >
+                        上一页
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={mineLoading || ignored.page * ignored.page_size >= ignored.total}
+                        onClick={() => void loadIgnored(ignored.page + 1)}
+                      >
+                        下一页
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <EmptyState icon={BookOpen} title="暂无屏蔽课程" description="屏蔽课程后，会显示在这里。" />
+                )}
+              </div>
             ) : homeLoading ? (
               <div className="flex h-32 items-center justify-center gap-2 text-xs text-ink-3">
                 <Spinner /> 正在读取最新点评…
@@ -635,26 +781,30 @@ export function CourseCommunityPage() {
                 <div className="mb-2 flex items-center justify-between">
                   <button
                     type="button"
-                    onClick={openMine}
+                    onClick={() => openMine('enrolled')}
                     className="text-sm font-semibold text-ink transition-colors hover:text-accent"
                   >
                     我的课程
                   </button>
                   <button
                     type="button"
-                    onClick={openMine}
+                    onClick={() => openMine('enrolled')}
                     className="text-[0.62rem] text-ink-3 transition-colors hover:text-ink"
                   >
-                    查看更多
+                    {enrollments.length ? `${enrollments.length} 门 · 查看更多` : '查看更多'}
                   </button>
                 </div>
                 <div className="space-y-2">
-                  {followed.length ? (
-                    followed.map((course) => (
-                      <CompactCourse key={course.id} course={course} onClick={() => void openCourse(course)} />
+                  {enrollments.length ? (
+                    enrollments.slice(0, 8).map((item) => (
+                      <CompactCourse
+                        key={item.id}
+                        course={item.course}
+                        onClick={() => void openCourse(item.course)}
+                      />
                     ))
                   ) : (
-                    <div className="text-[0.66rem] text-ink-3">暂无我的课程。</div>
+                    <div className="text-[0.66rem] text-ink-3">暂无选课记录。</div>
                   )}
                 </div>
               </div>

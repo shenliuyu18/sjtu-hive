@@ -44,6 +44,7 @@ import androidx.compose.ui.unit.dp
 import com.sjtuhive.app.data.CourseApi
 import com.sjtuhive.app.data.CourseAuthException
 import com.sjtuhive.app.data.CourseDetail
+import com.sjtuhive.app.data.CourseEnrollment
 import com.sjtuhive.app.data.CourseFilterOption
 import com.sjtuhive.app.data.CourseReview
 import com.sjtuhive.app.data.CourseSummary
@@ -63,10 +64,12 @@ fun CourseCommunityScreen(context: Context, onClose: () -> Unit) {
 
     var hot by remember { mutableStateOf<List<CourseSummary>>(emptyList()) }
     var homeReviews by remember { mutableStateOf<List<CourseReview>>(emptyList()) }
-    var followed by remember { mutableStateOf<List<CourseSummary>>(emptyList()) }
+    var enrolled by remember { mutableStateOf<List<CourseEnrollment>>(emptyList()) }
     var homeLoading by remember { mutableStateOf(false) }
     var searchMode by remember { mutableStateOf(false) }
     var mineMode by remember { mutableStateOf(false) }
+    var mineTab by remember { mutableStateOf("enrolled") }
+    var mineSemester by remember { mutableStateOf("") }
     var mine by remember { mutableStateOf<List<CourseSummary>>(emptyList()) }
     var minePage by remember { mutableIntStateOf(1) }
     var mineTotal by remember { mutableIntStateOf(0) }
@@ -97,17 +100,26 @@ fun CourseCommunityScreen(context: Context, onClose: () -> Unit) {
         }
     }
 
-    fun loadMine(nextPage: Int = 1) {
+    fun loadMine(tab: String = mineTab, nextPage: Int = 1) {
+        mineTab = tab
         scope.launch {
             mineLoading = true
             error = null
-            runCatching { api.followed(nextPage, 20) }
-                .onSuccess {
-                    mine = if (nextPage <= 1) it.items else mine + it.items
-                    minePage = it.page
-                    mineTotal = it.total
+            if (tab == "enrolled") {
+                runCatching { api.enrolled() }
+                    .onSuccess { enrolled = it }
+                    .onFailure { error = it.message ?: "读取选课记录失败" }
+            } else {
+                runCatching {
+                    if (tab == "followed") api.followed(nextPage, 20) else api.ignored(nextPage, 20)
                 }
-                .onFailure { error = it.message ?: "读取我的课程失败" }
+                    .onSuccess {
+                        mine = if (nextPage <= 1) it.items else mine + it.items
+                        minePage = it.page
+                        mineTotal = it.total
+                    }
+                    .onFailure { error = it.message ?: "读取我的课程失败" }
+            }
             mineLoading = false
         }
     }
@@ -120,8 +132,8 @@ fun CourseCommunityScreen(context: Context, onClose: () -> Unit) {
             runCatching { api.recentReviews(1, 20) }
                 .onSuccess { homeReviews = it.items }
                 .onFailure { error = it.message }
-            runCatching { api.followed(1, 10) }
-                .onSuccess { followed = it.items }
+            runCatching { api.enrolled() }
+                .onSuccess { enrolled = it }
             homeLoading = false
         }
     }
@@ -144,6 +156,9 @@ fun CourseCommunityScreen(context: Context, onClose: () -> Unit) {
         checking = false
         if (current != null) loadHome()
     }
+
+    val enrolledSemesters = enrolled.map { it.semester }.filter { it.isNotBlank() }.distinct().sortedDescending()
+    val visibleEnrollments = if (mineSemester.isBlank()) enrolled else enrolled.filter { it.semester == mineSemester }
 
     BackHandler {
         when {
@@ -304,8 +319,94 @@ fun CourseCommunityScreen(context: Context, onClose: () -> Unit) {
                 } else if (mineMode) {
                     Column(Modifier.fillMaxSize()) {
                         TextButton(onClick = { mineMode = false }) { Text("← 返回首页") }
-                        if (mineLoading && mine.isEmpty()) {
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 4.dp),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            listOf(
+                                "enrolled" to "选课记录",
+                                "followed" to "已关注",
+                                "ignored" to "已屏蔽",
+                            ).forEach { (value, label) ->
+                                FilterChip(
+                                    selected = mineTab == value,
+                                    onClick = {
+                                        mineSemester = ""
+                                        loadMine(value, 1)
+                                    },
+                                    label = { Text(label) },
+                                )
+                            }
+                        }
+                        if (mineTab == "enrolled" && enrolledSemesters.size > 1) {
+                            LazyRow(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            ) {
+                                item {
+                                    FilterChip(
+                                        selected = mineSemester.isBlank(),
+                                        onClick = { mineSemester = "" },
+                                        label = { Text("全部学期") },
+                                    )
+                                }
+                                items(enrolledSemesters) { semester ->
+                                    FilterChip(
+                                        selected = mineSemester == semester,
+                                        onClick = { mineSemester = semester },
+                                        label = { Text(semester) },
+                                    )
+                                }
+                            }
+                        }
+                        if (mineLoading && ((mineTab == "enrolled" && enrolled.isEmpty()) || (mineTab != "enrolled" && mine.isEmpty()))) {
                             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+                        } else if (mineTab == "enrolled") {
+                            LazyColumn(
+                                modifier = Modifier.fillMaxSize(),
+                                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 40.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                item {
+                                    Text(
+                                        "共 ${visibleEnrollments.size} 门",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                                items(visibleEnrollments, key = { it.id }) { item ->
+                                    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                        Text(
+                                            item.semester,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                        CourseRow(item.course) { openDetail(item.course) }
+                                    }
+                                }
+                                if (visibleEnrollments.isEmpty() && error == null) {
+                                    item {
+                                        Text(
+                                            "暂无选课记录。可在 course.sjtu.plus 的“我的课程”中同步教学网选课记录。",
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                }
+                                error?.let { message ->
+                                    item {
+                                        Text(
+                                            message,
+                                            color = MaterialTheme.colorScheme.error,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            modifier = Modifier.padding(12.dp),
+                                        )
+                                    }
+                                }
+                            }
                         } else {
                             LazyColumn(
                                 modifier = Modifier.fillMaxSize(),
@@ -313,22 +414,11 @@ fun CourseCommunityScreen(context: Context, onClose: () -> Unit) {
                                 verticalArrangement = Arrangement.spacedBy(8.dp),
                             ) {
                                 item {
-                                    Row(
-                                        Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically,
-                                    ) {
-                                        Text(
-                                            "我的课程",
-                                            style = MaterialTheme.typography.titleSmall,
-                                            color = MaterialTheme.colorScheme.primary,
-                                        )
-                                        Text(
-                                            "共 $mineTotal 门",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        )
-                                    }
+                                    Text(
+                                        "共 $mineTotal 门",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
                                 }
                                 items(mine, key = { it.id }) { course ->
                                     CourseRow(course) { openDetail(course) }
@@ -336,7 +426,7 @@ fun CourseCommunityScreen(context: Context, onClose: () -> Unit) {
                                 if (mine.isEmpty() && error == null) {
                                     item {
                                         Text(
-                                            "暂无我的课程。在 course.sjtu.plus 关注课程后会显示在这里。",
+                                            if (mineTab == "followed") "暂无关注课程。" else "暂无屏蔽课程。",
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         )
                                     }
@@ -344,7 +434,7 @@ fun CourseCommunityScreen(context: Context, onClose: () -> Unit) {
                                 if (mine.size < mineTotal) {
                                     item {
                                         TextButton(
-                                            onClick = { loadMine(minePage + 1) },
+                                            onClick = { loadMine(mineTab, minePage + 1) },
                                             modifier = Modifier.fillMaxWidth(),
                                         ) { Text(if (mineLoading) "加载中…" else "加载更多（${mine.size}/$mineTotal）") }
                                     }
@@ -404,29 +494,29 @@ fun CourseCommunityScreen(context: Context, onClose: () -> Unit) {
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 Text(
-                                    "我的课程",
+                                    if (enrolled.isEmpty()) "我的课程" else "我的课程 · ${enrolled.size} 门",
                                     style = MaterialTheme.typography.titleSmall,
                                     color = MaterialTheme.colorScheme.primary,
                                     modifier = Modifier.padding(top = 8.dp, bottom = 4.dp),
                                 )
                                 TextButton(onClick = {
                                     mineMode = true
-                                    loadMine(1)
+                                    loadMine("enrolled", 1)
                                 }) { Text("查看更多") }
                             }
                         }
-                        if (followed.isEmpty()) {
+                        if (enrolled.isEmpty()) {
                             item {
                                 Text(
-                                    "暂无我的课程。",
+                                    "暂无选课记录。",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.padding(vertical = 4.dp),
                                 )
                             }
                         } else {
-                            items(followed, key = { "follow-${it.id}" }) { course ->
-                                CourseRow(course) { openDetail(course) }
+                            items(enrolled.take(6), key = { "enroll-${it.id}" }) { item ->
+                                CourseRow(item.course) { openDetail(item.course) }
                             }
                         }
                         error?.let { message ->

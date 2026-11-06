@@ -48,6 +48,8 @@ data class CourseReviewPage(val items: List<CourseReview>, val total: Int, val p
 
 data class CoursePage(val items: List<CourseSummary>, val total: Int, val page: Int, val pageSize: Int)
 
+data class CourseEnrollment(val id: Long, val semester: String, val course: CourseSummary)
+
 data class CourseFilterOption(val name: String, val count: Int)
 
 data class CourseFilters(val departments: List<CourseFilterOption>, val semesters: List<CourseFilterOption>)
@@ -175,6 +177,31 @@ class CourseApi(private val context: Context) {
             )
         }
 
+    suspend fun ignored(page: Int = 1, pageSize: Int = 10): CoursePage =
+        withContext(Dispatchers.IO) {
+            val data = get("/course/ignored?page=${page.coerceAtLeast(1)}&page_size=${pageSize.coerceIn(1, 50)}")
+            CoursePage(
+                items = data.optJSONArray("items").toCourseSummaries(),
+                total = data.optInt("total"),
+                page = data.optInt("page", 1),
+                pageSize = data.optInt("page_size", pageSize),
+            )
+        }
+
+    suspend fun enrolled(): List<CourseEnrollment> = withContext(Dispatchers.IO) {
+        val data = getValue("/course/enrolled")
+        val array = when (data) {
+            is JSONArray -> data
+            is JSONObject -> data.optJSONArray("items") ?: JSONArray()
+            else -> JSONArray()
+        }
+        (0 until array.length()).mapNotNull { index ->
+            val item = array.optJSONObject(index) ?: return@mapNotNull null
+            val course = item.optJSONObject("course")?.toCourseSummary() ?: return@mapNotNull null
+            CourseEnrollment(item.optLong("id"), item.optString("semester"), course)
+        }
+    }
+
     suspend fun detail(id: Long): CourseDetail = withContext(Dispatchers.IO) {
         val data = get("/course/$id")
         val summary = data.toCourseSummary()
@@ -208,9 +235,13 @@ class CourseApi(private val context: Context) {
         )
     }
 
-    private fun get(path: String): JSONObject = getAbsolute("$BASE$path")
+    private fun get(path: String): JSONObject = getValue("$BASE$path") as JSONObject
 
-    private fun getAbsolute(url: String): JSONObject {
+    private fun getValue(path: String): Any = getValueAbsolute(if (path.startsWith("http")) path else "$BASE$path")
+
+    private fun getAbsolute(url: String): JSONObject = getValueAbsolute(url) as JSONObject
+
+    private fun getValueAbsolute(url: String): Any {
         val request = request(url) { header("Accept", "application/json") }.build()
         client.newCall(request).execute().use { response ->
             val text = response.body?.string().orEmpty()
@@ -220,7 +251,7 @@ class CourseApi(private val context: Context) {
                 throw CourseAuthException("选课社区登录已失效，请重新登录")
             }
             if (!response.isSuccessful) throw CourseAuthException(errorMessage(text, "选课社区返回 HTTP ${response.code}"))
-            return JSONObject(text)
+            return runCatching { JSONObject(text) }.getOrElse { JSONArray(text) }
         }
     }
 
