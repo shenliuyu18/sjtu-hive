@@ -162,7 +162,6 @@ export function Settings() {
   const [campusOpen, setCampusOpen] = useState(false);
   const [cookieText, setCookieText] = useState('');
   const [termsOpen, setTermsOpen] = useState<'terms' | 'privacy' | null>(null);
-  const [updateInfo, setUpdateInfo] = useState<string | null>(null);
   const [mailForm, setMailForm] = useState({
     address: '',
     password: '',
@@ -454,26 +453,6 @@ export function Settings() {
       refreshAccounts();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '清理失败');
-    }
-  };
-
-  const checkUpdate = async () => {
-    try {
-      const result = await call<{
-        available: boolean;
-        latest?: string;
-        message?: string;
-        url?: string;
-      }>('update.check');
-      if (!result) {
-        setUpdateInfo('当前构建不支持在线更新检查。');
-      } else if (result.available) {
-        setUpdateInfo(`发现新版本 ${result.latest ?? ''}${result.message ? `：${result.message}` : ''}`);
-      } else {
-        setUpdateInfo(result.message ?? '当前已是最新版本。');
-      }
-    } catch (error) {
-      setUpdateInfo(error instanceof Error ? error.message : '检查失败');
     }
   };
 
@@ -1146,17 +1125,8 @@ export function Settings() {
                 <Section title="SJTU Hive" description="本地优先的上海交大校园桌面。">
                   <Row
                     label="版本"
-                    description={`${info?.name ?? 'SJTU Hive'} v${info?.version ?? '0.1.0'} · Wails ${info?.wailsVersion ?? 'v2.16.0'}`}
-                    control={<Badge variant="accent">独立实现</Badge>}
-                  />
-                  <Row
-                    label="检查更新"
-                    description={updateInfo ?? '从配置的更新源手动检查；不会自动下载或安装。'}
-                    control={
-                      <Button size="sm" onClick={() => void checkUpdate()}>
-                        <RefreshCw className="size-3.5" /> 检查
-                      </Button>
-                    }
+                    description={`${info?.name ?? 'SJTU Hive'} · Wails ${info?.wailsVersion ?? 'v2.16.0'}`}
+                    control={<Badge variant="accent">v{info?.version ?? '0.1.0'}</Badge>}
                   />
                   <Row
                     label="本地数据"
@@ -1172,7 +1142,7 @@ export function Settings() {
                 <Section title="条款与隐私">
                   <Row
                     label="使用条款"
-                    description="本应用与上海交通大学无隶属关系，功能按现状提供。"
+                    description="独立第三方工具，与上海交通大学无隶属关系；功能按现状提供。"
                     control={
                       <Button size="sm" onClick={() => setTermsOpen('terms')}>
                         查看
@@ -1181,7 +1151,7 @@ export function Settings() {
                   />
                   <Row
                     label="隐私说明"
-                    description="数据只保存在本机；联网仅用于你主动配置的校园服务。"
+                    description="无遥测、无云端中转；数据只保存在本机，联网仅直达你主动使用的服务。"
                     control={
                       <Button size="sm" onClick={() => setTermsOpen('privacy')}>
                         查看
@@ -1205,10 +1175,6 @@ export function Settings() {
                     }
                   />
                 </Section>
-                <div className="rounded-card border border-line bg-surface-2 p-4 text-[0.68rem] leading-relaxed text-ink-3">
-                  <Info className="mb-1.5 size-4 text-ink-3" />
-                  本应用是独立实现，未复制第三方客户端的代码或界面素材。校园接口可能随学校系统调整而变化，请以官方页面为准。
-                </div>
               </>
             ) : null}
           </div>
@@ -1431,20 +1397,102 @@ export function Settings() {
 
       <Dialog open={termsOpen !== null} onOpenChange={(open) => !open && setTermsOpen(null)}>
         <DialogContent title={termsOpen === 'privacy' ? '隐私说明' : '使用条款'} wide>
-          <div className="selectable space-y-3 text-xs leading-relaxed text-ink-2">
+          <div className="selectable space-y-4 text-xs leading-relaxed text-ink-2">
             {termsOpen === 'privacy' ? (
               <>
-                <p>本应用是本地优先的桌面工具。账号 Token、邮箱密码、校园 Cookie 使用 Windows DPAPI 加密保存在本机，不会上传到任何服务器。</p>
-                <p>联网仅发生在你主动使用校园服务时：Canvas API、交大邮箱 IMAP/SMTP、教学信息服务网、课堂视频与水源社区。请求由本机直接发往对应服务，不经过第三方中转。</p>
-                <p>缓存文件、邮件索引与笔记保存在本机的数据目录中。你可以在设置中清理缓存或导出数据；卸载应用不会自动删除数据目录。</p>
-                <p>邮件与水源社区正文在沙箱中渲染；外部链接会交给系统浏览器打开。</p>
+                <section>
+                  <h3 className="mb-1 font-semibold text-ink">本地优先</h3>
+                  <p>
+                    本应用没有账号系统、不接入遥测或统计服务，也不设云端中转。开发者不收集、不上传你的个人信息、账号凭据、邮件、笔记或使用记录。所有功能均在本机运行。
+                  </p>
+                </section>
+                <section>
+                  <h3 className="mb-1 font-semibold text-ink">本机保存的数据</h3>
+                  <p>
+                    为让你无需重复登录，应用会把以下内容加密保存在本机：jAccount Cookie、校园邮箱密码、Canvas Token（回退）、水源社区 API Key（回退）、传承交大令牌、选课社区会话，以及数据库、设置、笔记与项目索引、缓存文件。
+                  </p>
+                </section>
+                <section>
+                  <h3 className="mb-1 font-semibold text-ink">加密与备份</h3>
+                  <p>
+                    上述凭据使用 Windows DPAPI 加密，只能由当前 Windows 用户解密。普通导出备份不含登录凭据；加密备份（*.hivebackup）使用 scrypt 派生密钥并以 AES-256-GCM 加密，口令不会被保存。WebDAV 备份上传到你自行配置的服务器，应用不保留副本。
+                  </p>
+                </section>
+                <section>
+                  <h3 className="mb-1 font-semibold text-ink">网络请求范围</h3>
+                  <p>
+                    联网只发生在你主动使用对应功能时，由本机直接连接相应服务，例如 i.sjtu.edu.cn、oc.sjtu.edu.cn、mail.sjtu.edu.cn（IMAP/SMTP）、my.sjtu.edu.cn、calendar.sjtu.edu.cn、v.sjtu.edu.cn、shuiyuan.sjtu.edu.cn、pan.sjtu.edu.cn、course.sjtu.plus、传承交大站点，以及你填写的 WebDAV 地址。请求不经过开发者服务器，也不会发送到上述服务之外的地址。
+                  </p>
+                </section>
+                <section>
+                  <h3 className="mb-1 font-semibold text-ink">日志与缓存</h3>
+                  <p>
+                    本地日志仅用于排查运行错误，可能包含请求地址、状态码与错误信息，不包含邮件正文、帖子内容或明文凭据；日志不会上传。缓存与日志可在设置中随时清理。
+                  </p>
+                </section>
+                <section>
+                  <h3 className="mb-1 font-semibold text-ink">卸载与删除</h3>
+                  <p>
+                    卸载应用不会自动删除数据目录。如需彻底清除，请手动删除 %APPDATA%\SJTU Hive、%LOCALAPPDATA%\SJTU Hive 与你自己创建的备份文件。
+                  </p>
+                </section>
+                <section>
+                  <h3 className="mb-1 font-semibold text-ink">第三方内容</h3>
+                  <p>
+                    邮件与社区正文在隔离环境中渲染，外部链接交由系统浏览器打开。第三方站点的数据处理遵循其各自的隐私政策。
+                  </p>
+                </section>
               </>
             ) : (
               <>
-                <p>本应用是独立实现，与上海交通大学无隶属关系。校园接口可能随学校系统调整而变化。</p>
-                <p>本应用不会绕过学校官方流程，不提供自动选课、场馆预约、批量抢资源等功能。Canvas 功能只读取课程资料与作业信息，不会替你提交作业。</p>
-                <p>课堂视频与水源社区属于试验功能，可能因学校服务调整而暂时不可用。请遵守学校网络与社区使用规范。</p>
-                <p>软件按现状提供，不对因使用本应用造成的成绩、账号或数据损失承担责任。请定期备份重要笔记。</p>
+                <section>
+                  <h3 className="mb-1 font-semibold text-ink">性质与关系</h3>
+                  <p>
+                    本应用是独立开发的第三方工具，与上海交通大学及其附属单位不存在隶属、合作或授权关系。应用名称与文案中的校名仅用于说明适用场景。
+                  </p>
+                </section>
+                <section>
+                  <h3 className="mb-1 font-semibold text-ink">功能范围</h3>
+                  <p>
+                    应用用于在本机聚合课程资料、校园邮箱、日程、课堂录像、水源社区、选课社区与传承交大等信息。不提供自动选课、抢课、场馆预约、刷课、代考等违反学校规定的功能，也不会绕过任何官方流程或权限控制。
+                  </p>
+                </section>
+                <section>
+                  <h3 className="mb-1 font-semibold text-ink">账号与凭据</h3>
+                  <p>
+                    登录由你在官方页面完成，凭据仅保存在本机。你应妥善保管设备、Windows 账户与备份口令；因设备丢失、共享账户或口令泄露造成的损失由使用者自行承担。
+                  </p>
+                </section>
+                <section>
+                  <h3 className="mb-1 font-semibold text-ink">内容与版权</h3>
+                  <p>
+                    课程资料、课堂录像、邮件与社区内容的权利归原权利人所有，仅供个人学习参考，不得传播、转载或用于商业用途。应用自身的代码与界面归开发者所有。
+                  </p>
+                </section>
+                <section>
+                  <h3 className="mb-1 font-semibold text-ink">第三方服务</h3>
+                  <p>
+                    校园系统与第三方站点可能随时调整接口、限流或停止服务。应用按“现状”提供，不保证功能持续可用、数据完整或结果准确；遇到接口变化时可能暂时无法使用。
+                  </p>
+                </section>
+                <section>
+                  <h3 className="mb-1 font-semibold text-ink">使用规范</h3>
+                  <p>
+                    你应遵守学校网络与信息安全规定、社区规范及适用法律，不得利用本应用进行批量抓取、攻击、骚扰、绕过权限或其他不当行为。
+                  </p>
+                </section>
+                <section>
+                  <h3 className="mb-1 font-semibold text-ink">免责声明</h3>
+                  <p>
+                    在法律允许的范围内，开发者不对因使用或无法使用本应用造成的成绩、账号、数据或设备损失承担责任。请自行定期备份重要笔记与资料。
+                  </p>
+                </section>
+                <section>
+                  <h3 className="mb-1 font-semibold text-ink">变更与终止</h3>
+                  <p>
+                    条款可能随功能调整而更新，更新后继续使用视为接受新条款。你可以随时停止使用并删除本应用及其数据。本条款适用中华人民共和国法律。
+                  </p>
+                </section>
               </>
             )}
           </div>
