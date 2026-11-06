@@ -55,6 +55,8 @@ type App struct {
 	schoolCalendar *SchoolCalendar
 	portalMessages *PortalMessages
 	cloudPan       *CloudPan
+	course         *CourseCommunity
+	share          *Share
 	exams          *Exams
 	search         *Search
 	notifications  *Notifications
@@ -252,6 +254,10 @@ func (a *App) registerServices() {
 	a.portalMessages.Register(a.router)
 	a.cloudPan = NewCloudPan(a.db, a.secrets, a.campus, a.media, a.emit)
 	a.cloudPan.Register(a.router)
+	a.course = NewCourseCommunity(a.secrets)
+	a.course.Register(a.router)
+	a.share = NewShare(a.secrets)
+	a.share.Register(a.router)
 	a.exams = NewExams(a.db, a.campus, a.notifications, a.logger, a.emit)
 	a.exams.Register(a.router)
 	a.notifications.Register(a.router)

@@ -15,6 +15,8 @@ import { TimetablePage } from '@/pages/TimetablePage';
 import { TodoPage } from '@/pages/TodoPage';
 import { ClassroomPage } from '@/pages/ClassroomPage';
 import { ShuiyuanPage } from '@/pages/ShuiyuanPage';
+import { CourseCommunityPage } from '@/pages/CourseCommunityPage';
+import { SharePage } from '@/pages/SharePage';
 import { CloudPanPage } from '@/pages/CloudPanPage';
 import { WorkspacePage } from '@/pages/WorkspacePage';
 import { NotificationsPage } from '@/pages/NotificationsPage';
@@ -53,6 +55,10 @@ function pageFor(view: ReturnType<typeof useApp.getState>['view']) {
       return <ClassroomPage />;
     case 'shuiyuan':
       return <ShuiyuanPage />;
+    case 'course':
+      return <CourseCommunityPage />;
+    case 'share':
+      return <SharePage />;
     case 'cloudpan':
       return <CloudPanPage />;
     case 'todo':

@@ -17,7 +17,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Email
+import androidx.compose.material.icons.outlined.FolderShared
 import androidx.compose.material.icons.outlined.Forum
+import androidx.compose.material.icons.outlined.MenuBook
 import androidx.compose.material.icons.outlined.PlayCircleOutline
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
@@ -60,6 +62,8 @@ fun OverviewScreen(
     onOpenCanvas: () -> Unit,
     onOpenEmail: () -> Unit,
     onOpenClassroom: () -> Unit,
+    onOpenCourse: () -> Unit,
+    onOpenShare: () -> Unit,
     onOpenMail: (Int) -> Unit,
 ) {
     val today = remember { LocalDate.now() }
@@ -175,6 +179,8 @@ fun OverviewScreen(
                     onOpenCanvas = onOpenCanvas,
                     onOpenEmail = onOpenEmail,
                     onOpenClassroom = onOpenClassroom,
+                    onOpenCourse = onOpenCourse,
+                    onOpenShare = onOpenShare,
                 )
             }
             return@Column
@@ -344,6 +350,8 @@ fun OverviewScreen(
                 onOpenCanvas = onOpenCanvas,
                 onOpenEmail = onOpenEmail,
                 onOpenClassroom = onOpenClassroom,
+                onOpenCourse = onOpenCourse,
+                onOpenShare = onOpenShare,
             )
         }
     }
@@ -373,6 +381,8 @@ private fun FeatureGrid(
     onOpenCanvas: () -> Unit,
     onOpenEmail: () -> Unit,
     onOpenClassroom: () -> Unit,
+    onOpenCourse: () -> Unit,
+    onOpenShare: () -> Unit,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -404,6 +414,22 @@ private fun FeatureGrid(
                 title = "课堂视频",
                 subtitle = "录像与文稿",
                 onClick = onOpenClassroom,
+                modifier = Modifier.weight(1f),
+            )
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FeatureTile(
+                icon = Icons.Outlined.MenuBook,
+                title = "选课社区",
+                subtitle = "课程评价",
+                onClick = onOpenCourse,
+                modifier = Modifier.weight(1f),
+            )
+            FeatureTile(
+                icon = Icons.Outlined.FolderShared,
+                title = "传承交大",
+                subtitle = "共享资料",
+                onClick = onOpenShare,
                 modifier = Modifier.weight(1f),
             )
         }

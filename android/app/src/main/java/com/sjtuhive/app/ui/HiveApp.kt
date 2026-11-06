@@ -154,6 +154,8 @@ private fun HiveShell() {
     var showEmail by remember { mutableStateOf(false) }
     var emailRequest by remember { mutableStateOf<Pair<String, Int>?>(null) }
     var showClassroom by remember { mutableStateOf(false) }
+    var showCourseCommunity by remember { mutableStateOf(false) }
+    var showShare by remember { mutableStateOf(false) }
     val tabStates = rememberSaveableStateHolder()
     // 登录态切换（登录完成/退出）时丢弃旧账号的页面缓存。
     LaunchedEffect(sessionVersion) {
@@ -205,6 +207,8 @@ private fun HiveShell() {
                         onOpenCanvas = { showCanvas = true },
                         onOpenEmail = { showEmail = true },
                         onOpenClassroom = { showClassroom = true },
+                        onOpenCourse = { showCourseCommunity = true },
+                        onOpenShare = { showShare = true },
                         onOpenMail = { index ->
                             emailRequest = "INBOX" to index
                             showEmail = true
@@ -265,6 +269,12 @@ private fun HiveShell() {
         if (showClassroom) {
             ClassroomScreen(context = context, onClose = { showClassroom = false })
         }
+        if (showCourseCommunity) {
+            CourseCommunityScreen(context = context, onClose = { showCourseCommunity = false })
+        }
+        if (showShare) {
+            ShareScreen(context = context, onClose = { showShare = false })
+        }
         loginTarget?.let { target ->
             Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
                 LoginWebView(
@@ -292,7 +302,7 @@ private fun HiveShell() {
             }
         }
         if (loginTarget == null && !showShuiyuan && !showCanvas && !showEmail && !showClassroom &&
-            PreviewHost.request == null
+            !showCourseCommunity && !showShare && PreviewHost.request == null
         ) FloatingBottomBar(
             modifier = Modifier
                 .align(Alignment.BottomCenter)

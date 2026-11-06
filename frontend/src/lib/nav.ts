@@ -1,10 +1,12 @@
 import type { LucideIcon } from 'lucide-react';
 import {
   Bell,
+  BookOpen,
   CalendarDays,
   Cloud,
   FolderOpen,
   LayoutDashboard,
+  Library,
   ListTodo,
   Mail,
   MessagesSquare,
@@ -42,8 +44,15 @@ export const navGroups: NavGroup[] = [
       { id: 'mail', label: '邮箱', short: '邮箱', icon: Mail },
       { id: 'timetable', label: '日程', short: '日程', icon: CalendarDays },
       { id: 'classroom', label: '课堂视频', short: '视频', icon: MonitorPlay },
-      { id: 'shuiyuan', label: '水源', short: '水源', icon: MessagesSquare },
       { id: 'cloudpan', label: '云盘', short: '云盘', icon: Cloud },
+    ],
+  },
+  {
+    label: '社区',
+    items: [
+      { id: 'shuiyuan', label: '水源', short: '水源', icon: MessagesSquare },
+      { id: 'course', label: '选课社区', short: '选课', icon: BookOpen },
+      { id: 'share', label: '传承交大', short: '传承', icon: Library },
     ],
   },
   {

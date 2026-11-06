@@ -48,6 +48,8 @@ export type AppView =
   | 'timetable'
   | 'classroom'
   | 'shuiyuan'
+  | 'course'
+  | 'share'
   | 'cloudpan'
   | 'todo'
   | 'workspace'
