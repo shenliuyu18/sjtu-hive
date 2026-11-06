@@ -88,7 +88,7 @@ gradle :app:assembleDebug   # 或 :app:assembleRelease（需本地 keystore.prop
 
 Release 中的 APK 为维护者本地正式签名；`android/keystore.properties` 与 `android/keystore/` 不入库。Release 构建默认启用 R8 与资源裁剪，规则见 `app/proguard-rules.pro`；每次发布需归档 `app/build/outputs/mapping/release/mapping.txt`。
 
-版本约定：正式发布使用稳定的 `x.y.z`；日常开发、联调和测试包统一使用 `x.y.z-beta.N`，不发布为正式版。
+版本约定：对外发布使用稳定的 `x.y.z` 版本号；开发构建不对外发布。
 
 ## 已知限制
 
@@ -96,7 +96,7 @@ Release 中的 APK 为维护者本地正式签名；`android/keystore.properties
 - 日程来自交我办日历，本地日程不写回学校系统。
 - 单标签组（无分屏）、固定快捷键（无自定义键位）、无静默自动更新。
 - 旧版 Office 为只读轻量渲染，复杂排版、宏与嵌入对象可能丢失；PPTX 不播放切换动画与过渡效果，仅呈现静态页面。
-- 水源为 beta，接口可能随站点调整；邮箱一次配置一个账户。
+- 水源社区为实验性功能，接口可能随站点调整；邮箱一次配置一个账户。
 - 课堂视频「全量缓存」以本地下载实现；未做转码/合并；已开始传输的流中断后由播放器重试。
 - 自动更新只做「检查更新 + 打开下载地址」，不自动下载或安装。
 

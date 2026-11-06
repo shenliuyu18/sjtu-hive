@@ -21,14 +21,12 @@ func NewUpdate(settings *Settings) *Update {
 	return &Update{settings: settings}
 }
 
-func normalizeVersion(value string) ([]int, string) {
+func normalizeVersion(value string) []int {
 	value = strings.TrimPrefix(strings.TrimSpace(value), "v")
 	if index := strings.IndexByte(value, '+'); index >= 0 {
 		value = value[:index]
 	}
-	prerelease := ""
 	if index := strings.IndexByte(value, '-'); index >= 0 {
-		prerelease = value[index+1:]
 		value = value[:index]
 	}
 	parts := strings.Split(value, ".")
@@ -37,51 +35,12 @@ func normalizeVersion(value string) ([]int, string) {
 		number, _ := strconv.Atoi(part)
 		result = append(result, number)
 	}
-	return result, prerelease
-}
-
-func comparePrerelease(left, right string) int {
-	if left == right {
-		return 0
-	}
-	if left == "" {
-		return 1
-	}
-	if right == "" {
-		return -1
-	}
-	a, b := strings.Split(left, "."), strings.Split(right, ".")
-	for index := 0; index < len(a) && index < len(b); index++ {
-		if a[index] == b[index] {
-			continue
-		}
-		an, aerr := strconv.Atoi(a[index])
-		bn, berr := strconv.Atoi(b[index])
-		switch {
-		case aerr == nil && berr == nil:
-			if an > bn {
-				return 1
-			}
-			return -1
-		case aerr == nil:
-			return -1
-		case berr == nil:
-			return 1
-		case a[index] > b[index]:
-			return 1
-		default:
-			return -1
-		}
-	}
-	if len(a) > len(b) {
-		return 1
-	}
-	return -1
+	return result
 }
 
 func compareVersions(left, right string) int {
-	a, aPre := normalizeVersion(left)
-	b, bPre := normalizeVersion(right)
+	a := normalizeVersion(left)
+	b := normalizeVersion(right)
 	for index := 0; index < len(a) || index < len(b); index++ {
 		var av, bv int
 		if index < len(a) {
@@ -97,7 +56,7 @@ func compareVersions(left, right string) int {
 			return -1
 		}
 	}
-	return comparePrerelease(aPre, bPre)
+	return 0
 }
 
 func (u *Update) Check() (map[string]any, error) {
