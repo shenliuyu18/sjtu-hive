@@ -4,6 +4,8 @@
 
 > 本应用是参考 Dela 行为与交大公开接口的独立实现，**没有复制 Dela 的源码或界面素材**，与上海交通大学、Dela 作者均无隶属关系。
 
+官网：<https://shenliuyu18.github.io/sjtu-hive/>
+
 ![概览](docs/screenshots/01-overview.png)
 
 ## 功能
