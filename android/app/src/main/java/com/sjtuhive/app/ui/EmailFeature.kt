@@ -52,18 +52,24 @@ import com.sjtuhive.app.data.MailSummary
 import kotlinx.coroutines.launch
 
 @Composable
-fun EmailScreen(context: Context, onClose: () -> Unit) {
+fun EmailScreen(
+    context: Context,
+    onClose: () -> Unit,
+    initialFolder: String? = null,
+    initialIndex: Int? = null,
+) {
     val api = remember { MailApi(context) }
     var configured by remember { mutableStateOf(api.account() != null) }
     var address by remember { mutableStateOf(api.account()?.address.orEmpty()) }
     var password by remember { mutableStateOf("") }
     var messages by remember { mutableStateOf<List<MailSummary>>(emptyList()) }
     var folders by remember { mutableStateOf<List<MailFolder>>(emptyList()) }
-    var selectedFolder by remember { mutableStateOf("INBOX") }
+    var selectedFolder by remember { mutableStateOf(initialFolder ?: "INBOX") }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var reload by remember { mutableIntStateOf(0) }
     var openIndex by remember { mutableIntStateOf(0) }
+    var initialIndexHandled by remember { mutableStateOf(false) }
     var composing by remember { mutableStateOf(false) }
     var composeTo by remember { mutableStateOf("") }
     var composeSubject by remember { mutableStateOf("") }
@@ -86,6 +92,15 @@ fun EmailScreen(context: Context, onClose: () -> Unit) {
             .onSuccess { messages = it }
             .onFailure { error = it.message ?: "收信失败" }
         loading = false
+    }
+
+    LaunchedEffect(messages, initialIndex) {
+        val target = initialIndex
+        if (initialIndexHandled || target == null || target <= 0) return@LaunchedEffect
+        if (messages.any { it.index == target }) {
+            openIndex = target
+            initialIndexHandled = true
+        }
     }
 
     BackHandler {

@@ -27,6 +27,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { call, on } from '@/lib/bridge';
 import type {
+  DocumentContent,
   MailDraft,
   MailDraftSummary,
   MailFolder,
@@ -42,6 +43,7 @@ import { useApp } from '@/stores/app';
 import { Button } from '@/components/ui/Button';
 import { Input, Textarea } from '@/components/ui/Input';
 import { Dialog, DialogContent } from '@/components/ui/Dialog';
+import { PreviewPane } from '@/components/content/PreviewPane';
 import { Badge, Card, EmptyState, PageHeader, Spinner } from '@/components/ui/Misc';
 import { HtmlFrame } from '@/components/content/HtmlFrame';
 
@@ -161,6 +163,7 @@ function MailListItem({
 
 export function MailPage() {
   const navigate = useApp((state) => state.navigate);
+  const params = useApp((state) => state.params);
   const [state, setState] = useState<MailState | null>(null);
   const [folders, setFolders] = useState<MailFolder[]>([]);
   const [drafts, setDrafts] = useState<MailDraftSummary[]>([]);
@@ -180,6 +183,10 @@ export function MailPage() {
   const [sending, setSending] = useState(false);
   const autoSyncRef = useRef(false);
   const savingDraftRef = useRef(false);
+  const mailRouteRef = useRef<number | null>(null);
+  const [previewDoc, setPreviewDoc] = useState<DocumentContent | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewPart, setPreviewPart] = useState<string | null>(null);
 
   const refreshBase = useCallback(async () => {
     const [stateResult, folderResult, draftResult, trashResult] = await Promise.allSettled([
@@ -263,6 +270,36 @@ export function MailPage() {
       alive = false;
     };
   }, [state?.account?.address, selection, query, tick]);
+
+  useEffect(() => {
+    const raw = params.mailMessageId;
+    const id = typeof raw === 'number' ? raw : Number(raw);
+    if (!Number.isFinite(id) || id <= 0 || mailRouteRef.current === id || folders.length === 0) return;
+    mailRouteRef.current = id;
+    const folderPath = typeof params.mailFolder === 'string' ? params.mailFolder : '';
+    const folder =
+      folders.find((item) => item.path === folderPath) ??
+      folders.find((item) => item.specialUse === 'inbox' || item.path.toLowerCase() === 'inbox') ??
+      folders[0];
+    if (folder) setSelection({ kind: 'server', folder });
+    setSelectedId(id);
+    setDetail(null);
+    setDetailError(null);
+    setDetailLoading(true);
+    void call<MailMessageDetail>('mail.getMessage', id)
+      .then((value) => {
+        setDetail(value);
+        void call('mail.markSeen', id, true)
+          .then(() => {
+            setDetail((current) => (current ? { ...current, seen: true } : current));
+            void refreshBase();
+          })
+          .catch(() => {});
+      })
+      .catch((cause) => setDetailError(cause instanceof Error ? cause.message : String(cause)))
+      .finally(() => setDetailLoading(false));
+    navigate('mail', {});
+  }, [folders, navigate, params, refreshBase]);
 
   const serverFolders = useMemo(
     () => folders.filter((folder) => folder.specialUse !== 'drafts' && folder.specialUse !== 'trash'),
@@ -537,6 +574,20 @@ export function MailPage() {
       if (result?.url) void call('app.openExternal', result.url);
     } catch (cause) {
       toast.error(cause instanceof Error ? cause.message : '附件不可用');
+    }
+  };
+
+  const previewAttachment = async (part: string) => {
+    if (!detail) return;
+    setPreviewPart(part);
+    setPreviewLoading(true);
+    try {
+      setPreviewDoc(await call<DocumentContent>('mail.previewAttachment', detail.id, part));
+    } catch (cause) {
+      toast.error(cause instanceof Error ? cause.message : '附件预览失败');
+    } finally {
+      setPreviewLoading(false);
+      setPreviewPart(null);
     }
   };
 
@@ -905,19 +956,34 @@ export function MailPage() {
                   </div>
                   <div className="flex flex-wrap gap-2">
                     {detail.attachments.map((attachment) => (
-                      <button
+                      <div
                         key={attachment.part}
-                        type="button"
-                        onClick={() => attachment.part && void downloadAttachment(attachment.part)}
-                        className="flex max-w-[18rem] items-center gap-2 rounded-lg border border-line bg-surface px-2.5 py-1.5 text-left transition-colors hover:border-line-strong"
+                        className="flex max-w-[18rem] items-center gap-1 rounded-lg border border-line bg-surface pl-2.5 transition-colors hover:border-line-strong"
                       >
-                        <FileText className="size-3.5 shrink-0 text-ink-3" />
-                        <span className="min-w-0 flex-1 truncate text-[0.66rem] text-ink-2">
-                          {attachment.filename}
-                        </span>
-                        <span className="shrink-0 text-[0.6rem] text-ink-3">{formatBytes(attachment.size)}</span>
-                        <Download className="size-3 shrink-0 text-ink-3" />
-                      </button>
+                        <button
+                          type="button"
+                          disabled={!attachment.part || previewLoading}
+                          onClick={() => attachment.part && void previewAttachment(attachment.part)}
+                          className="flex min-w-0 flex-1 items-center gap-2 py-1.5 text-left disabled:opacity-60"
+                          title="内嵌预览"
+                        >
+                          <FileText className="size-3.5 shrink-0 text-ink-3" />
+                          <span className="min-w-0 flex-1 truncate text-[0.66rem] text-ink-2">
+                            {attachment.filename}
+                          </span>
+                          <span className="shrink-0 text-[0.6rem] text-ink-3">{formatBytes(attachment.size)}</span>
+                          {previewPart === attachment.part ? <Spinner className="size-3 shrink-0" /> : null}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => attachment.part && void downloadAttachment(attachment.part)}
+                          className="rounded p-1.5 text-ink-3 hover:bg-hover hover:text-ink"
+                          title="下载附件"
+                          aria-label="下载附件"
+                        >
+                          <Download className="size-3" />
+                        </button>
+                      </div>
                     ))}
                   </div>
                 </div>
@@ -926,6 +992,22 @@ export function MailPage() {
           )}
         </section>
       </div>
+
+      {previewDoc ? (
+        <div className="fixed inset-0 z-[70] flex bg-black/45 p-4">
+          <div className="mx-auto h-full w-full max-w-6xl overflow-hidden rounded-xl border border-line bg-surface shadow-[var(--shadow-pop)]">
+            <PreviewPane
+              doc={previewDoc}
+              loading={previewLoading}
+              actions={
+                <Button size="sm" variant="secondary" onClick={() => setPreviewDoc(null)}>
+                  关闭
+                </Button>
+              }
+            />
+          </div>
+        </div>
+      ) : null}
 
       <Dialog open={composer !== null} onOpenChange={(open) => !open && closeComposer()}>
         <DialogContent

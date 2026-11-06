@@ -2,6 +2,7 @@ package com.sjtuhive.app.ui
 
 import com.sjtuhive.app.data.CloudFile
 import com.sjtuhive.app.data.ExamItem
+import com.sjtuhive.app.data.MailSummary
 import com.sjtuhive.app.data.PortalMessage
 import com.sjtuhive.app.data.SchoolEvent
 
@@ -17,6 +18,8 @@ internal object HiveUiCache {
         val recent: List<PortalMessage>,
         val events: List<SchoolEvent>,
         val nextExam: ExamItem?,
+        val mailUnread: Int = 0,
+        val recentMail: List<MailSummary> = emptyList(),
         val at: Long,
     )
 

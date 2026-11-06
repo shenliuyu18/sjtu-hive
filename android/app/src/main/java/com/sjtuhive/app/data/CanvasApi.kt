@@ -3,8 +3,11 @@ package com.sjtuhive.app.data
 import android.content.Context
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
 
 data class CanvasCourse(
     val id: Long,
@@ -106,6 +109,40 @@ class CanvasApi(private val context: Context) {
         result
     }
 
+    suspend fun file(fileId: Long): CanvasFile = withContext(Dispatchers.IO) {
+        val item = JSONObject(get("/files/$fileId"))
+        CanvasFile(
+            id = item.optLong("id", fileId),
+            name = item.text("display_name").ifBlank { item.text("filename") },
+            size = item.optLong("size"),
+            contentType = item.text("content-type").ifBlank { item.text("content_type") },
+            url = item.text("url"),
+            updatedAt = item.text("updated_at").ifBlank { item.text("created_at") },
+        )
+    }
+
+    suspend fun download(file: CanvasFile, cacheDir: File): File = withContext(Dispatchers.IO) {
+        val name = file.name.replace(Regex("[\\\\/:*?\"<>|]"), "_").ifBlank { "canvas-file" }
+        val directory = File(cacheDir, "canvas-preview").apply { mkdirs() }
+        val target = File(directory, name)
+        if (target.exists() && target.length() > 0) return@withContext target
+        val request = Request.Builder()
+            .url(file.url)
+            .header("Authorization", "Bearer ${token()}")
+            .build()
+        downloadClient.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) error("下载失败：HTTP ${response.code}")
+            val body = response.body ?: error("下载失败：响应为空")
+            val temp = File(directory, "$name.part")
+            temp.outputStream().use { output -> body.byteStream().use { it.copyTo(output) } }
+            if (!temp.renameTo(target)) {
+                temp.copyTo(target, overwrite = true)
+                temp.delete()
+            }
+        }
+        target
+    }
+
     suspend fun assignments(courseId: Long): List<CanvasAssignment> = withContext(Dispatchers.IO) {
         val array = JSONArray(get("/courses/$courseId/assignments?per_page=100&order_by=due_at"))
         (0 until array.length()).mapNotNull { index ->
@@ -204,5 +241,6 @@ class CanvasApi(private val context: Context) {
 
     companion object {
         private const val BASE = "https://oc.sjtu.edu.cn/api/v1"
+        private val downloadClient = OkHttpClient.Builder().followRedirects(true).build()
     }
 }

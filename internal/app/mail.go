@@ -845,6 +845,17 @@ func (m *Mail) Register(router *Router) {
 		}
 		return m.GetMessage(id)
 	})
+	router.Handle("mail.previewAttachment", func(args []json.RawMessage) (any, error) {
+		id, err := DecodeArg[int64](args, 0)
+		if err != nil {
+			return nil, err
+		}
+		part, err := DecodeArg[string](args, 1)
+		if err != nil {
+			return nil, err
+		}
+		return m.PreviewAttachment(id, part)
+	})
 	router.Handle("mail.attachmentUrl", func(args []json.RawMessage) (any, error) {
 		id, err := DecodeArg[int64](args, 0)
 		if err != nil {

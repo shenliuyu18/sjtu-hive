@@ -3,6 +3,7 @@ package com.sjtuhive.app.ui
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
+import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.Color as AndroidColor
 import android.graphics.pdf.PdfRenderer
@@ -34,6 +35,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
@@ -63,6 +65,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.content.FileProvider
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -246,6 +249,23 @@ private fun FilePreviewScreen(request: PreviewRequest) {
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
+                            Button(onClick = {
+                                runCatching {
+                                    val uri = FileProvider.getUriForFile(
+                                        context,
+                                        "${context.packageName}.files",
+                                        file!!,
+                                    )
+                                    context.startActivity(
+                                        Intent.createChooser(
+                                            Intent(Intent.ACTION_VIEW)
+                                                .setDataAndType(uri, "*/*")
+                                                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION),
+                                            "打开文件",
+                                        ),
+                                    )
+                                }.onFailure { toast(context, it.message ?: "没有可打开该文件的应用") }
+                            }) { Text("用其他应用打开") }
                         }
                     }
                 }

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <cache-path name="preview" path="preview/" />
+    <cache-path name="canvas" path="canvas-preview/" />
+    <cache-path name="pptx" path="pptx-videos/" />
+</paths>

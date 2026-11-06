@@ -1188,7 +1188,7 @@ func (c *Canvas) readFileData(ctx context.Context, courseID, fileID int64, name,
 
 func proxyPreviewFormat(format string) bool {
 	switch format {
-	case "pdf", "docx", "xlsx", "image", "video", "audio":
+	case "pdf", "docx", "xlsx", "pptx", "doc", "ppt", "image", "video", "audio":
 		return true
 	default:
 		return false

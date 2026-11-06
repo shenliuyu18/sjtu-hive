@@ -46,6 +46,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import com.sjtuhive.app.data.MailApi
+import com.sjtuhive.app.data.MailSummary
 import com.sjtuhive.app.data.CampusSession
 import com.sjtuhive.app.data.HiveApi
 import com.sjtuhive.app.data.HiveHttp
@@ -61,17 +63,37 @@ fun MessagesScreen(
     context: Context,
     loggedIn: Boolean,
     onLogin: () -> Unit,
+    onOpenEmail: (folder: String, index: Int) -> Unit,
 ) {
     val cached = HiveUiCache.messages
+    val mailApi = remember { MailApi(context) }
+    val mailConfigured = remember { mailApi.account() != null }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var messages by remember { mutableStateOf(cached?.messages ?: emptyList()) }
     var unread by remember { mutableStateOf(cached?.unread ?: 0) }
     var reload by remember { mutableStateOf(0) }
     var selected by remember { mutableStateOf<PortalMessage?>(null) }
+    var mailMessages by remember { mutableStateOf<List<MailSummary>>(emptyList()) }
+    var mailLoading by remember { mutableStateOf(false) }
+    var mailError by remember { mutableStateOf<String?>(null) }
     val listState = rememberLazyListState()
 
     BackHandler(enabled = selected != null) { selected = null }
+
+    LaunchedEffect(loggedIn, reload, mailConfigured) {
+        if (!loggedIn) return@LaunchedEffect
+        if (!mailConfigured) {
+            mailMessages = emptyList()
+            return@LaunchedEffect
+        }
+        mailLoading = true
+        mailError = null
+        runCatching { mailApi.inbox("INBOX", 12).filter { !it.seen } }
+            .onSuccess { mailMessages = it }
+            .onFailure { mailError = it.message ?: "读取邮件失败" }
+        mailLoading = false
+    }
 
     LaunchedEffect(loggedIn, reload) {
         if (!loggedIn) return@LaunchedEffect
@@ -136,13 +158,14 @@ fun MessagesScreen(
             return@Column
         }
         Column(Modifier.padding(start = 24.dp, end = 24.dp, top = 12.dp, bottom = 4.dp)) {
-            Text("交我办消息", style = MaterialTheme.typography.headlineMedium)
+            Text("消息", style = MaterialTheme.typography.headlineMedium)
             Text(
                 when {
-                    loading -> "正在读取…"
+                    loading || mailLoading -> "正在读取…"
                     error != null -> error ?: ""
-                    unread > 0 -> "$unread 条未读"
-                    messages.isNotEmpty() -> "共 ${messages.size} 条最近消息"
+                    unread > 0 || mailMessages.isNotEmpty() ->
+                        "交我办 $unread · 邮件 ${mailMessages.size}"
+                    messages.isNotEmpty() || mailMessages.isNotEmpty() -> "暂无未读消息"
                     else -> "暂无未读消息"
                 },
                 style = MaterialTheme.typography.bodySmall,
@@ -160,6 +183,87 @@ fun MessagesScreen(
             contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 120.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
+            item {
+                Text(
+                    "邮件",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+            if (!mailConfigured) {
+                item {
+                    TextButton(onClick = { onOpenEmail("INBOX", 0) }) {
+                        Text("配置邮箱以同步邮件")
+                    }
+                }
+            } else {
+                items(mailMessages, key = { "mail-${it.index}" }) { mail ->
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(MaterialTheme.colorScheme.surface)
+                            .clickable { onOpenEmail("INBOX", mail.index) }
+                            .padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                "邮件",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(999.dp))
+                                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f))
+                                    .padding(horizontal = 8.dp, vertical = 2.dp),
+                            )
+                            Text(
+                                mail.date,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Text(
+                            mail.subject,
+                            style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                        Text(
+                            mail.from,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                if (mailError != null) {
+                    item {
+                        Text(
+                            "邮件读取失败：$mailError",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                } else if (mailMessages.isEmpty() && !mailLoading) {
+                    item {
+                        Text(
+                            "没有未读邮件。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+            }
+            item {
+                Text(
+                    "交我办",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
             items(messages, key = { it.id }) { message ->
                 Column(
                     Modifier
@@ -188,7 +292,7 @@ fun MessagesScreen(
                     )
                 }
             }
-            if (messages.isEmpty() && error == null) {
+            if (messages.isEmpty() && mailMessages.isEmpty() && error == null && mailConfigured) {
                 item {
                     Text(
                         "暂无未读消息。",

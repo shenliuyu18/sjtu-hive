@@ -278,6 +278,22 @@ func (m *Mail) parseBody(row mailMessageRow, body io.Reader) (string, string, []
 	return bodyText, bodyHTML, attachments, snippet
 }
 
+// attachmentPath derives the on-disk attachment path for rows whose JSON predates
+// LocalPath persistence; attachments are always stored as <part>-<filename>.
+func (m *Mail) attachmentPath(messageID int64, attachment MailAttachmentInfo) string {
+	if attachment.LocalPath != "" {
+		return attachment.LocalPath
+	}
+	if attachment.Part == "" {
+		return ""
+	}
+	return filepath.Join(
+		m.paths.MailDir,
+		strconv.FormatInt(messageID, 10),
+		attachment.Part+"-"+sanitizeFilename(attachment.Filename, attachment.Part),
+	)
+}
+
 func (m *Mail) detailFromRow(row mailMessageRow) MailMessageDetail {
 	detail := MailMessageDetail{
 		MailMessageSummary: MailMessageSummary{
@@ -300,10 +316,11 @@ func (m *Mail) detailFromRow(row mailMessageRow) MailMessageDetail {
 	if detail.BodyHTML != nil && *detail.BodyHTML != "" {
 		body := *detail.BodyHTML
 		for _, attachment := range detail.Attachments {
-			if attachment.LocalPath == "" {
+			localPath := m.attachmentPath(row.ID, attachment)
+			if localPath == "" {
 				continue
 			}
-			url, err := m.media.AddFile(attachment.LocalPath, attachment.Filename, attachment.ContentType, time.Hour)
+			url, err := m.media.AddFile(localPath, attachment.Filename, attachment.ContentType, time.Hour)
 			if err != nil {
 				continue
 			}
@@ -318,15 +335,51 @@ func (m *Mail) detailFromRow(row mailMessageRow) MailMessageDetail {
 	}
 	for index := range detail.Attachments {
 		attachment := &detail.Attachments[index]
-		if attachment.LocalPath == "" {
+		localPath := m.attachmentPath(row.ID, *attachment)
+		if localPath == "" {
 			continue
 		}
-		if url, err := m.media.AddFile(attachment.LocalPath, attachment.Filename, attachment.ContentType, time.Hour); err == nil {
+		if url, err := m.media.AddFile(localPath, attachment.Filename, attachment.ContentType, time.Hour); err == nil {
 			attachment.URL = url
 		}
 		attachment.LocalPath = ""
 	}
 	return detail
+}
+
+// PreviewAttachment exposes an attachment inline so the renderer can preview it.
+func (m *Mail) PreviewAttachment(messageID int64, part string) (DocumentContent, error) {
+	row, err := m.loadMessageRow(messageID)
+	if err != nil {
+		return DocumentContent{}, err
+	}
+	var attachments []MailAttachmentInfo
+	_ = json.Unmarshal([]byte(row.AttachmentsJSON), &attachments)
+	for _, attachment := range attachments {
+		localPath := m.attachmentPath(messageID, attachment)
+		if attachment.Part != part || localPath == "" {
+			continue
+		}
+		ext := strings.TrimPrefix(strings.ToLower(filepath.Ext(attachment.Filename)), ".")
+		contentType := attachment.ContentType
+		if known, ok := binaryExtensions[ext]; ok && known != "" {
+			contentType = known
+		}
+		resource, err := m.media.AddFile(localPath, attachment.Filename, contentType, time.Hour)
+		if err != nil {
+			return DocumentContent{}, err
+		}
+		format := formatOf(attachment.Filename, ext, false)
+		content := DocumentContent{
+			Title: attachment.Filename, Size: attachment.Size, Format: format,
+			ResourceURL: resource, ReadOnly: true, ModifiedAt: Now(),
+		}
+		if format == "binary" {
+			content.Message = "该附件格式暂不支持内嵌预览，请下载后打开。"
+		}
+		return content, nil
+	}
+	return DocumentContent{}, errors.New("附件不存在")
 }
 
 func (m *Mail) AttachmentURL(messageID int64, part string) (map[string]string, error) {
@@ -337,10 +390,11 @@ func (m *Mail) AttachmentURL(messageID int64, part string) (map[string]string, e
 	var attachments []MailAttachmentInfo
 	_ = json.Unmarshal([]byte(row.AttachmentsJSON), &attachments)
 	for _, attachment := range attachments {
-		if attachment.Part != part || attachment.LocalPath == "" {
+		localPath := m.attachmentPath(messageID, attachment)
+		if attachment.Part != part || localPath == "" {
 			continue
 		}
-		url, err := m.media.AddFile(attachment.LocalPath, attachment.Filename, attachment.ContentType, time.Hour)
+		url, err := m.media.AddFile(localPath, attachment.Filename, attachment.ContentType, time.Hour)
 		if err != nil {
 			return nil, err
 		}

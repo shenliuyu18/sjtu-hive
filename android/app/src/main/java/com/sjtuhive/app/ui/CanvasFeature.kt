@@ -1,11 +1,9 @@
 package com.sjtuhive.app.ui
 
 import android.annotation.SuppressLint
-import android.app.DownloadManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import android.os.Environment
 import android.text.TextUtils
 import android.webkit.WebView
 import android.widget.Toast
@@ -112,8 +110,6 @@ fun CanvasScreen(context: Context, onClose: () -> Unit) {
     var error by remember { mutableStateOf<String?>(null) }
     var reload by remember { mutableIntStateOf(0) }
     var showTokenDialog by remember { mutableStateOf(false) }
-    var selectedFile by remember { mutableStateOf<CanvasFile?>(null) }
-    var busy by remember { mutableStateOf(false) }
     var reading by remember { mutableStateOf<CanvasDoc?>(null) }
     var opening by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -340,6 +336,24 @@ fun CanvasScreen(context: Context, onClose: () -> Unit) {
                                                         "Discussion" -> openDoc(moduleItem.url) {
                                                             api.discussionDoc(current.id, moduleItem.contentId)
                                                         }
+                                                        "File" -> scope.launch {
+                                                            runCatching { api.file(moduleItem.contentId) }
+                                                                .onSuccess { file ->
+                                                                    PreviewHost.open(
+                                                                        PreviewRequest(
+                                                                            title = file.name,
+                                                                            fileName = file.name,
+                                                                            load = { api.download(file, context.cacheDir) },
+                                                                            download = {
+                                                                                val saved = api.download(file, context.cacheDir)
+                                                                                saveToDownloads(context, saved, file.name)
+                                                                                "已保存到系统下载目录"
+                                                                            },
+                                                                        ),
+                                                                    )
+                                                                }
+                                                                .onFailure { toast(context, it.message ?: "文件不可用") }
+                                                        }
                                                         else -> openLink(context, moduleItem.url)
                                                     }
                                                 }
@@ -439,7 +453,20 @@ fun CanvasScreen(context: Context, onClose: () -> Unit) {
                                         .fillMaxWidth()
                                         .clip(RoundedCornerShape(16.dp))
                                         .background(MaterialTheme.colorScheme.surface)
-                                        .clickable { selectedFile = file }
+                                        .clickable {
+                                            PreviewHost.open(
+                                                PreviewRequest(
+                                                    title = file.name,
+                                                    fileName = file.name,
+                                                    load = { api.download(file, context.cacheDir) },
+                                                    download = {
+                                                        val saved = api.download(file, context.cacheDir)
+                                                        saveToDownloads(context, saved, file.name)
+                                                        "已保存到系统下载目录"
+                                                    },
+                                                ),
+                                            )
+                                        }
                                         .padding(14.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -492,52 +519,6 @@ fun CanvasScreen(context: Context, onClose: () -> Unit) {
             },
             dismissButton = {
                 TextButton(onClick = { showTokenDialog = false }) { Text("取消") }
-            },
-        )
-    }
-
-    selectedFile?.let { file ->
-        AlertDialog(
-            onDismissRequest = { if (!busy) selectedFile = null },
-            title = { Text(file.name) },
-            text = { Text("用系统应用打开，或保存到本机下载目录。") },
-            confirmButton = {
-                TextButton(
-                    enabled = !busy,
-                    onClick = {
-                        busy = true
-                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(file.url))
-                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        runCatching { context.startActivity(intent) }
-                            .onFailure { toast(context, "没有可打开该文件的应用") }
-                        busy = false
-                        selectedFile = null
-                    },
-                ) { Text("打开") }
-            },
-            dismissButton = {
-                TextButton(
-                    enabled = !busy,
-                    onClick = {
-                        busy = true
-                        runCatching {
-                            val request = DownloadManager.Request(Uri.parse(file.url))
-                                .setTitle(file.name)
-                                .setNotificationVisibility(
-                                    DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED,
-                                )
-                                .setDestinationInExternalPublicDir(
-                                    Environment.DIRECTORY_DOWNLOADS,
-                                    file.name,
-                                )
-                            context.getSystemService(DownloadManager::class.java)?.enqueue(request)
-                                ?: error("系统下载器不可用")
-                            toast(context, "已加入下载")
-                        }.onFailure { toast(context, it.message ?: "下载失败") }
-                        busy = false
-                        selectedFile = null
-                    },
-                ) { Text("下载") }
             },
         )
     }

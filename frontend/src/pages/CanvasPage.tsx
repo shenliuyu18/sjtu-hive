@@ -22,7 +22,7 @@ import {
   Settings2,
   X,
 } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { call, on } from '@/lib/bridge';
 import type {
@@ -160,6 +160,8 @@ function TreeRow({
 
 export function CanvasPage() {
   const navigate = useApp((state) => state.navigate);
+  const params = useApp((state) => state.params);
+  const canvasRouteRef = useRef<string | null>(null);
   const [state, setState] = useState<CanvasState | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -311,6 +313,26 @@ export function CanvasPage() {
       setPreviewLoading(false);
     }
   };
+
+  useEffect(() => {
+    const raw = params.canvasSourceId;
+    if (raw === undefined || raw === null || raw === '') return;
+    const id = String(raw);
+    if (canvasRouteRef.current === id || !state) return;
+    const item = state.items.find((entry) => entry.id === id);
+    if (!item) return;
+    canvasRouteRef.current = id;
+    setSelectedCourseId(item.courseId);
+    setTab(
+      item.kind === 'assignment'
+        ? 'assignments'
+        : item.kind === 'page' || item.kind === 'discussion'
+          ? 'pages'
+          : 'files',
+    );
+    navigate('canvas', {});
+    void openPreview(item);
+  }, [navigate, params, state, openPreview]);
 
   const toggleExpanded = (id: string) => {
     setExpanded((value) => {

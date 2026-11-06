@@ -152,6 +152,7 @@ private fun HiveShell() {
     var showShuiyuan by remember { mutableStateOf(false) }
     var showCanvas by remember { mutableStateOf(false) }
     var showEmail by remember { mutableStateOf(false) }
+    var emailRequest by remember { mutableStateOf<Pair<String, Int>?>(null) }
     var showClassroom by remember { mutableStateOf(false) }
     val tabStates = rememberSaveableStateHolder()
     // 登录态切换（登录完成/退出）时丢弃旧账号的页面缓存。
@@ -204,6 +205,10 @@ private fun HiveShell() {
                         onOpenCanvas = { showCanvas = true },
                         onOpenEmail = { showEmail = true },
                         onOpenClassroom = { showClassroom = true },
+                        onOpenMail = { index ->
+                            emailRequest = "INBOX" to index
+                            showEmail = true
+                        },
                     )
                     1 -> ScheduleScreen(
                         context = context,
@@ -215,6 +220,10 @@ private fun HiveShell() {
                         context = context,
                         loggedIn = loggedIn,
                         onLogin = { loginTarget = MySjtuLogin },
+                        onOpenEmail = { folder, index ->
+                            emailRequest = folder to index
+                            showEmail = true
+                        },
                     )
                     3 -> CloudPanScreen(
                         context = context,
@@ -243,7 +252,15 @@ private fun HiveShell() {
             CanvasScreen(context = context, onClose = { showCanvas = false })
         }
         if (showEmail) {
-            EmailScreen(context = context, onClose = { showEmail = false })
+            EmailScreen(
+                context = context,
+                onClose = {
+                    showEmail = false
+                    emailRequest = null
+                },
+                initialFolder = emailRequest?.first,
+                initialIndex = emailRequest?.second,
+            )
         }
         if (showClassroom) {
             ClassroomScreen(context = context, onClose = { showClassroom = false })

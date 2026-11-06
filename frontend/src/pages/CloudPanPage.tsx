@@ -35,6 +35,7 @@ export function CloudPanPage() {
   const [doc, setDoc] = useState<DocumentContent | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
+  const [previewFile, setPreviewFile] = useState<CloudPanFile | null>(null);
   const [downloading, setDownloading] = useState('');
   const [uploading, setUploading] = useState('');
   const [uploadProgress, setUploadProgress] = useState<{ sent: number; total: number } | null>(null);
@@ -125,6 +126,7 @@ export function CloudPanPage() {
   };
 
   const preview = async (file: CloudPanFile) => {
+    setPreviewFile(file);
     setPreviewLoading(true);
     setPreviewError(null);
     try {
@@ -372,6 +374,18 @@ export function CloudPanPage() {
             loading={previewLoading}
             error={previewError}
             emptyText="点击文件名即可在线预览（PDF / 图片 / 音视频走流式代理）。"
+            actions={
+              doc?.format === 'binary' && previewFile ? (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={downloading === previewFile.path}
+                  onClick={() => void download(previewFile)}
+                >
+                  <Download className="size-3.5" /> 下载到本机
+                </Button>
+              ) : undefined
+            }
           />
         </div>
       </div>
