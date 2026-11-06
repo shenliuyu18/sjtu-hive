@@ -150,6 +150,7 @@ const canvasItems: CanvasItem[] = [
 function canvasState(): CanvasState {
   return {
     connected: true,
+    token: false,
     syncedAt: isoAt(0, 8),
     courses: canvasCourses,
     items: canvasItems,

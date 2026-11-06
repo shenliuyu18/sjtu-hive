@@ -322,6 +322,7 @@ func (a *App) registerServices() {
 	a.router.Handle("app.exportBackup", func([]json.RawMessage) (any, error) {
 		return a.ExportBackup()
 	})
+	a.registerWebDAV(a.router)
 	a.startCanvasBackground()
 	a.router.Handle("classroom.exportTranscript", func(args []json.RawMessage) (any, error) {
 		videoID, err := DecodeArg[int64](args, 0)

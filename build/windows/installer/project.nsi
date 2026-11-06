@@ -88,6 +88,11 @@ Function .onInit
 FunctionEnd
 
 Section
+    DetailPrint "Closing running ${INFO_PRODUCTNAME}..."
+    nsExec::Exec '"$SYSDIR\taskkill.exe" /IM "${PRODUCT_EXECUTABLE}" /F /T'
+    Pop $0
+    Sleep 700
+
     !insertmacro wails.setShellContext
 
     !insertmacro wails.webview2runtime
@@ -106,6 +111,9 @@ Section
 SectionEnd
 
 Section "uninstall"
+    nsExec::Exec '"$SYSDIR\taskkill.exe" /IM "${PRODUCT_EXECUTABLE}" /F /T'
+    Pop $0
+    Sleep 500
     !insertmacro wails.setShellContext
 
     # Keep %APPDATA%\SJTU (database, secrets, settings, logs) across upgrades and uninstalls.

@@ -116,3 +116,33 @@ func (s *SecretStore) Exists(name string) bool {
 	_, err = os.Stat(path)
 	return err == nil
 }
+
+// ExportPlain decrypts every stored secret for inclusion in an encrypted backup.
+func (s *SecretStore) ExportPlain(exclude ...string) (map[string]json.RawMessage, error) {
+	entries, err := os.ReadDir(s.dir)
+	if err != nil {
+		return nil, err
+	}
+	skip := make(map[string]bool, len(exclude))
+	for _, name := range exclude {
+		skip[name] = true
+	}
+	result := make(map[string]json.RawMessage)
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".bin") {
+			continue
+		}
+		name := strings.TrimSuffix(entry.Name(), ".bin")
+		if skip[name] {
+			continue
+		}
+		data, ok, err := s.LoadRaw(name)
+		if err != nil {
+			return nil, err
+		}
+		if ok && len(data) > 0 {
+			result[name] = json.RawMessage(append([]byte(nil), data...))
+		}
+	}
+	return result, nil
+}

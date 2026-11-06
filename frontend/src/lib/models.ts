@@ -22,6 +22,7 @@ export interface CanvasItem {
 
 export interface CanvasState {
   connected: boolean;
+  token: boolean;
   syncedAt: string | null;
   courses: CanvasCourse[];
   items: CanvasItem[];

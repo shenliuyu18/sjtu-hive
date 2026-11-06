@@ -1,5 +1,7 @@
 import type { LucideIcon } from 'lucide-react';
 import {
+  AlertTriangle,
+  CloudUpload,
   Database,
   Download,
   ExternalLink,
@@ -158,6 +160,17 @@ export function Settings() {
     smtpHost: 'mail.sjtu.edu.cn',
     smtpPort: '465',
   });
+  const [webdav, setWebdav] = useState<{
+    configured: boolean;
+    url?: string;
+    directory?: string;
+    username?: string;
+  } | null>(null);
+  const [webdavUrl, setWebdavUrl] = useState('');
+  const [webdavDir, setWebdavDir] = useState('');
+  const [webdavUser, setWebdavUser] = useState('');
+  const [webdavPass, setWebdavPass] = useState('');
+  const [webdavPassphrase, setWebdavPassphrase] = useState('');
 
   const refreshAccounts = () => {
     void Promise.allSettled([
@@ -165,11 +178,21 @@ export function Settings() {
       call<MailState>('mail.state'),
       call<CampusStatus>('campus.status'),
       call<{ connected: boolean; username: string | null }>('shuiyuan.state'),
+      call<{ configured: boolean; url?: string; directory?: string; username?: string }>(
+        'backup.webdav.state',
+      ),
     ]).then((results) => {
       setCanvasState(results[0].status === 'fulfilled' ? results[0].value : null);
       setMailState(results[1].status === 'fulfilled' ? results[1].value : null);
       setCampus(results[2].status === 'fulfilled' ? results[2].value : null);
       setShuiyuanState(results[3].status === 'fulfilled' ? results[3].value : null);
+      if (results[4].status === 'fulfilled') {
+        const value = results[4].value;
+        setWebdav(value);
+        setWebdavUrl(value.url ?? '');
+        setWebdavDir(value.directory ?? '');
+        setWebdavUser(value.username ?? '');
+      }
     });
     void call<number>('app.cacheSize')
       .then(setCacheSize)
@@ -197,6 +220,46 @@ export function Settings() {
       setCanvasOpen(false);
       setCanvasToken('');
       refreshAccounts();
+    } catch {
+      // toast already shown
+    }
+  };
+
+  const saveWebdav = async () => {
+    if (!webdavUrl.trim()) {
+      toast.error('请填写 WebDAV 地址');
+      return;
+    }
+    try {
+      const next = await call<{
+        configured: boolean;
+        url?: string;
+        directory?: string;
+        username?: string;
+      }>('backup.webdav.save', webdavUrl.trim(), webdavDir.trim(), webdavUser.trim(), webdavPass);
+      setWebdav(next);
+      setWebdavPass('');
+      toast.success('WebDAV 备份配置已保存');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '保存失败');
+    }
+  };
+
+  const uploadWebdav = async () => {
+    if ([...webdavPassphrase].length < 8) {
+      toast.error('加密口令至少 8 个字符');
+      return;
+    }
+    try {
+      const result = await toast
+        .promise(call<{ name: string; size: number }>('backup.webdav.upload', webdavPassphrase), {
+          loading: '正在加密并上传…',
+          success: (value) => `已上传 ${value.name}（${formatBytes(value.size)}）`,
+          error: (error) => (error instanceof Error ? error.message : '上传失败'),
+        })
+        .unwrap();
+      setWebdavPassphrase('');
+      return result;
     } catch {
       // toast already shown
     }
@@ -368,28 +431,28 @@ export function Settings() {
           <div className="min-w-0 space-y-6">
             {section === 'accounts' ? (
               <>
-                <Section title="账户与连接" description="每个账户都需要手动配置；不读取其他应用的登录数据。">
+                <Section title="账户与连接" description="校园 jAccount 只需登录一次；Canvas、水源、云盘、课堂视频与传承交大都会自动复用。仅邮箱和选课社区需要单独凭据。">
                   <AccountCard
                     icon={KeyRound}
                     title="Canvas"
-                    subtitle="oc.sjtu.edu.cn · 个人 Access Token"
+                    subtitle="oc.sjtu.edu.cn · 自动复用校园 jAccount；Token 仅作回退"
                     connected={Boolean(canvasState?.connected)}
                   >
-                    <Button size="sm" variant="primary" onClick={() => setCanvasOpen(true)}>
-                      {canvasState?.connected ? '重新配置' : '连接 Canvas'}
+                    <Button size="sm" variant={canvasState?.connected ? 'ghost' : 'primary'} onClick={() => setCanvasOpen(true)}>
+                      {canvasState?.connected ? '管理 Token' : '配置 Canvas'}
                     </Button>
-                    {canvasState?.connected ? (
+                    {canvasState?.token ? (
                       <Button
                         size="sm"
                         variant="ghost"
                         onClick={() =>
                           void call('canvas.disconnect').then(() => {
-                            toast.success('已断开 Canvas');
+                            toast.success('已清除 Canvas Token');
                             refreshAccounts();
                           })
                         }
                       >
-                        <LogOut className="size-3.5" /> 断开
+                        <LogOut className="size-3.5" /> 清除 Token
                       </Button>
                     ) : null}
                     {canvasState?.courses?.length ? (
@@ -401,7 +464,7 @@ export function Settings() {
                   <AccountCard
                     icon={Mail}
                     title="校园邮箱"
-                    subtitle="交大邮箱或任意 IMAP / SMTP 邮箱"
+                    subtitle="IMAP / SMTP 邮箱密码；邮件协议不支持 jAccount SSO"
                     connected={Boolean(mailState?.account)}
                   >
                     <Button size="sm" variant="primary" onClick={() => setMailOpen(true)}>
@@ -427,8 +490,8 @@ export function Settings() {
                   </AccountCard>
                   <AccountCard
                     icon={Wifi}
-                    title="教学信息服务网"
-                    subtitle="i.sjtu.edu.cn · 日程与课堂视频共用登录"
+                    title="校园 jAccount（教学信息服务网）"
+                    subtitle="i.sjtu.edu.cn · Canvas / 水源 / 云盘 / 课堂视频 / 传承交大共用"
                     connected={Boolean(campus?.connected)}
                   >
                     <Button size="sm" variant="primary" onClick={() => setCampusOpen(true)}>
@@ -455,7 +518,7 @@ export function Settings() {
                   <AccountCard
                     icon={Server}
                     title="水源社区"
-                    subtitle="shuiyuan.sjtu.edu.cn · 只读 + 回复 + 发帖"
+                    subtitle="shuiyuan.sjtu.edu.cn · 自动复用校园 jAccount；API Key 仅作回退"
                     connected={Boolean(shuiyuanState?.connected)}
                   >
                     <Button size="sm" variant="primary" onClick={() => navigate('shuiyuan')}>
@@ -468,7 +531,7 @@ export function Settings() {
                 </Section>
                 <div className="rounded-card border border-line bg-surface-2 p-4 text-[0.68rem] leading-relaxed text-ink-3">
                   <ShieldCheck className="mb-1.5 size-4 text-success" />
-                  Token、邮箱密码与校园 Cookie 使用 Windows DPAPI 加密保存在本机，不会上传到任何服务器。
+                  jAccount Cookie、邮箱密码以及回退用的 Canvas Token / 水源 API Key 均使用 Windows DPAPI 加密保存在本机，不会上传到任何服务器。
                 </div>
               </>
             ) : null}
@@ -773,6 +836,108 @@ export function Settings() {
                     }
                   />
                 </Section>
+                <Section
+                  title="WebDAV 备份"
+                  description="把包含登录凭据的完整备份加密后上传到你自己的 WebDAV；加密口令不会保存。"
+                >
+                  <div className="m-4 rounded-xl border border-warn/30 bg-warn/10 p-4 text-[0.68rem] leading-relaxed text-ink-2">
+                    <div className="mb-1.5 flex items-center gap-2 font-semibold text-warn">
+                      <AlertTriangle className="size-4" /> 风险提醒
+                    </div>
+                    <ul className="list-disc space-y-1 pl-4">
+                      <li>WebDAV 服务器由你自行提供，其可用性、隐私与访问控制由你负责。</li>
+                      <li>
+                        备份会先用 AES-256-GCM 和口令加密再上传；口令不保存在应用或服务器，丢失后无法恢复。
+                      </li>
+                      <li>不要把口令与备份文件放在同一位置；公共或共享 WebDAV 仍可能被删除、覆盖或篡改。</li>
+                      <li>
+                        备份包含 jAccount Cookie、邮箱密码、Canvas Token、水源 API Key 等登录凭据，请像保管密码一样保管加密口令。
+                      </li>
+                      <li>备份不包含 WebDAV 自身的登录密码；换机恢复后需重新配置 WebDAV。</li>
+                    </ul>
+                  </div>
+                  <div className="space-y-3 border-t border-line p-4">
+                    <div className="space-y-2">
+                      <Input
+                        value={webdavUrl}
+                        onChange={(event) => setWebdavUrl(event.target.value)}
+                        placeholder="WebDAV 地址，例如 https://dav.example.com/remote.php/dav/files/me"
+                      />
+                      <div className="grid gap-2 md:grid-cols-3">
+                        <Input
+                          value={webdavDir}
+                          onChange={(event) => setWebdavDir(event.target.value)}
+                          placeholder="远程目录（可选，需已存在）"
+                        />
+                        <Input
+                          value={webdavUser}
+                          onChange={(event) => setWebdavUser(event.target.value)}
+                          placeholder="用户名"
+                          autoComplete="username"
+                        />
+                        <Input
+                          type="password"
+                          value={webdavPass}
+                          onChange={(event) => setWebdavPass(event.target.value)}
+                          placeholder={webdav?.configured ? '密码已保存（留空保持不变）' : '密码'}
+                          autoComplete="current-password"
+                        />
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button size="sm" variant="secondary" onClick={() => void saveWebdav()}>
+                        保存配置
+                      </Button>
+                      {webdav?.configured ? (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() =>
+                            void call('backup.webdav.clear').then(() => {
+                              setWebdav({ configured: false });
+                              setWebdavUrl('');
+                              setWebdavDir('');
+                              setWebdavUser('');
+                              setWebdavPass('');
+                              toast.success('已清除 WebDAV 配置');
+                            })
+                          }
+                        >
+                          <Trash2 className="size-3.5" /> 清除
+                        </Button>
+                      ) : null}
+                      {webdav?.configured ? (
+                        <span className="text-[0.64rem] text-ink-3">
+                          已配置 {webdav.url}
+                          {webdav.directory ? ` / ${webdav.directory}` : ''}
+                        </span>
+                      ) : null}
+                    </div>
+                    <div className="border-t border-line pt-3">
+                      <div className="text-xs font-medium text-ink">加密并上传</div>
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <Input
+                          type="password"
+                          value={webdavPassphrase}
+                          onChange={(event) => setWebdavPassphrase(event.target.value)}
+                          placeholder="加密口令（至少 8 个字符，不保存）"
+                          className="min-w-[16rem] flex-1"
+                        />
+                        <Button
+                          size="sm"
+                          onClick={() => void uploadWebdav()}
+                          disabled={!webdav?.configured || webdavPassphrase.length < 8}
+                        >
+                          <CloudUpload className="size-3.5" /> 加密上传
+                        </Button>
+                      </div>
+                      <p className="mt-2 text-[0.64rem] leading-relaxed text-ink-3">
+                        生成 `*.hivebackup` 文件后通过 WebDAV PUT 上传；包内包含数据库、设置、项目列表与登录凭据（jAccount
+                        Cookie、邮箱密码、Canvas Token、水源 API Key 等），整个文件已用口令加密。
+                      </p>
+                    </div>
+                  </div>
+                </Section>
               </>
             ) : null}
 
@@ -852,15 +1017,15 @@ export function Settings() {
 
       <Dialog open={canvasOpen} onOpenChange={setCanvasOpen}>
         <DialogContent
-          title="连接 Canvas"
-          description="在 Canvas 的「账户 → 设置 → 新建访问令牌」创建 Personal Access Token，然后粘贴到这里。"
+          title="Canvas Token（回退）"
+          description="Canvas 默认复用校园 jAccount，无需 Token。只有在 jAccount 自动登录不可用时，才需要粘贴 Canvas 的 Personal Access Token。"
           footer={
             <>
               <Button variant="ghost" onClick={() => setCanvasOpen(false)}>
                 取消
               </Button>
               <Button variant="primary" onClick={() => void saveCanvas()} disabled={!canvasToken.trim()}>
-                连接
+                保存 Token
               </Button>
             </>
           }
@@ -875,7 +1040,7 @@ export function Settings() {
             autoFocus
           />
           <p className="mt-3 text-[0.68rem] leading-relaxed text-ink-3">
-            Token 使用 Windows DPAPI 加密，仅保存在本机。同步会读取课程、课件、作业与公告；不会提交作业或修改课程内容。
+            Token 使用 Windows DPAPI 加密，仅保存在本机；不会替代校园 jAccount 登录。同步会读取课程、课件、作业与公告，不会提交作业或修改课程内容。
           </p>
         </DialogContent>
       </Dialog>

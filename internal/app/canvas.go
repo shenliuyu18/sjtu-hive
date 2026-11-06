@@ -45,6 +45,7 @@ type CanvasItem struct {
 
 type CanvasState struct {
 	Connected bool           `json:"connected"`
+	Token     bool           `json:"token"`
 	SyncedAt  *string        `json:"syncedAt"`
 	Courses   []CanvasCourse `json:"courses"`
 	Items     []CanvasItem   `json:"items"`
@@ -916,7 +917,7 @@ func absoluteCanvasURL(value string) string {
 }
 
 func (c *Canvas) State() (CanvasState, error) {
-	state := CanvasState{Connected: c.Connected(), Courses: []CanvasCourse{}, Items: []CanvasItem{}}
+	state := CanvasState{Connected: c.Connected(), Token: c.loadToken() != "", Courses: []CanvasCourse{}, Items: []CanvasItem{}}
 	rows, err := c.db.Query(`SELECT id, name, term, code, synced_at, error, archived FROM canvas_courses
 		ORDER BY term DESC, name`)
 	if err != nil {

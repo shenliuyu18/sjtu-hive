@@ -11,6 +11,7 @@ require (
 	github.com/microcosm-cc/bluemonday v1.0.27
 	github.com/wailsapp/wails/v2 v2.16.0
 	github.com/wneessen/go-mail v0.6.2
+	golang.org/x/crypto v0.53.0
 	golang.org/x/sys v0.46.0
 	modernc.org/sqlite v1.34.5
 )
@@ -55,7 +56,6 @@ require (
 	github.com/valyala/fasttemplate v1.2.2 // indirect
 	github.com/wailsapp/go-webview2 v1.0.22 // indirect
 	github.com/wailsapp/mimetype v1.4.1 // indirect
-	golang.org/x/crypto v0.53.0 // indirect
 	golang.org/x/net v0.56.0 // indirect
 	golang.org/x/text v0.39.0 // indirect
 	modernc.org/libc v1.55.3 // indirect
