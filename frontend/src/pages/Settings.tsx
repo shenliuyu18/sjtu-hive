@@ -7,16 +7,15 @@ import {
   Download,
   ExternalLink,
   FolderCog,
+  GraduationCap,
   Import,
   Info,
-  KeyRound,
   Laptop,
   LogOut,
   Mail,
   Palette,
   RefreshCw,
   RotateCcw,
-  Server,
   Settings2,
   ShieldCheck,
   Sparkles,
@@ -28,7 +27,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { toast } from 'sonner';
 import { call } from '@/lib/bridge';
 import { formatBytes } from '@/lib/format';
-import type { CampusStatus, CanvasState, MailState } from '@/lib/models';
+import type { CampusStatus, MailState } from '@/lib/models';
 import type { SettingsState } from '@/lib/types';
 import { cn } from '@/lib/cn';
 import { useApp } from '@/stores/app';
@@ -149,13 +148,16 @@ export function Settings() {
   const [section, setSection] = useState<SectionId>(
     (params.settingsSection as SectionId) || 'accounts',
   );
-  const [canvasState, setCanvasState] = useState<CanvasState | null>(null);
   const [mailState, setMailState] = useState<MailState | null>(null);
   const [campus, setCampus] = useState<CampusStatus | null>(null);
-  const [shuiyuanState, setShuiyuanState] = useState<{ connected: boolean; username: string | null } | null>(null);
+  const [courseState, setCourseState] = useState<{
+    loggedIn: boolean;
+    user: { username: string; email: string } | null;
+  } | null>(null);
   const [cacheSize, setCacheSize] = useState<number | null>(null);
-  const [canvasOpen, setCanvasOpen] = useState(false);
-  const [canvasToken, setCanvasToken] = useState('');
+  const [courseOpen, setCourseOpen] = useState(false);
+  const [courseEmail, setCourseEmail] = useState('');
+  const [coursePassword, setCoursePassword] = useState('');
   const [mailOpen, setMailOpen] = useState(false);
   const [campusOpen, setCampusOpen] = useState(false);
   const [cookieText, setCookieText] = useState('');
@@ -192,20 +194,18 @@ export function Settings() {
 
   const refreshAccounts = () => {
     void Promise.allSettled([
-      call<CanvasState>('canvas.state'),
-      call<MailState>('mail.state'),
       call<CampusStatus>('campus.status'),
-      call<{ connected: boolean; username: string | null }>('shuiyuan.state'),
+      call<MailState>('mail.state'),
+      call<{ loggedIn: boolean; user: { username: string; email: string } | null }>('course.state'),
       call<{ configured: boolean; url?: string; directory?: string; username?: string }>(
         'backup.webdav.state',
       ),
     ]).then((results) => {
-      setCanvasState(results[0].status === 'fulfilled' ? results[0].value : null);
+      setCampus(results[0].status === 'fulfilled' ? results[0].value : null);
       setMailState(results[1].status === 'fulfilled' ? results[1].value : null);
-      setCampus(results[2].status === 'fulfilled' ? results[2].value : null);
-      setShuiyuanState(results[3].status === 'fulfilled' ? results[3].value : null);
-      if (results[4].status === 'fulfilled') {
-        const value = results[4].value;
+      setCourseState(results[2].status === 'fulfilled' ? results[2].value : null);
+      if (results[3].status === 'fulfilled') {
+        const value = results[3].value;
         setWebdav(value);
         setWebdavUrl(value.url ?? '');
         setWebdavDir(value.directory ?? '');
@@ -249,24 +249,6 @@ export function Settings() {
       active = false;
     };
   }, [section, webdav?.configured]);
-
-  const saveCanvas = async () => {
-    if (!canvasToken.trim()) return;
-    try {
-      await toast
-        .promise(call('canvas.configure', canvasToken.trim()), {
-          loading: '正在验证 Canvas Token…',
-          success: 'Canvas 已连接',
-          error: (error) => (error instanceof Error ? error.message : '连接失败'),
-        })
-        .unwrap();
-      setCanvasOpen(false);
-      setCanvasToken('');
-      refreshAccounts();
-    } catch {
-      // toast already shown
-    }
-  };
 
   const saveWebdav = async () => {
     if (!webdavUrl.trim()) {
@@ -383,6 +365,27 @@ export function Settings() {
     }
   };
 
+  const saveCourse = async () => {
+    if (!courseEmail.trim() || !coursePassword) {
+      toast.error('请填写选课社区邮箱与密码');
+      return;
+    }
+    try {
+      await toast
+        .promise(call('course.login', courseEmail.trim(), coursePassword), {
+          loading: '正在登录选课社区…',
+          success: '选课社区已登录',
+          error: (error) => (error instanceof Error ? error.message : '登录失败'),
+        })
+        .unwrap();
+      setCourseOpen(false);
+      setCoursePassword('');
+      refreshAccounts();
+    } catch {
+      // toast already shown
+    }
+  };
+
   const saveMail = async () => {
     try {
       await toast
@@ -479,7 +482,7 @@ export function Settings() {
     { id: 'mail', label: '邮箱' },
     { id: 'timetable', label: '日程' },
     { id: 'classroom', label: '课堂视频' },
-    { id: 'shuiyuan', label: '水源' },
+    { id: 'shuiyuan', label: '水源社区' },
     { id: 'todo', label: 'TODO' },
     { id: 'workspace', label: '工作台' },
   ];
@@ -549,34 +552,32 @@ export function Settings() {
           <div className="min-w-0 space-y-6">
             {section === 'accounts' ? (
               <>
-                <Section title="账户与连接" description="校园 jAccount 只需登录一次；Canvas、水源、云盘、课堂视频与传承交大都会自动复用。仅邮箱和选课社区需要单独凭据。">
+                <Section title="账户与连接" description="校园 jAccount 只需登录一次；Canvas、水源社区、云盘、课堂视频与传承交大都会自动复用。邮箱与选课社区使用各自的账号。">
                   <AccountCard
-                    icon={KeyRound}
-                    title="Canvas"
-                    subtitle="oc.sjtu.edu.cn · 自动复用校园 jAccount；Token 仅作回退"
-                    connected={Boolean(canvasState?.connected)}
+                    icon={Wifi}
+                    title="校园 jAccount（教学信息服务网）"
+                    subtitle="i.sjtu.edu.cn · Canvas / 水源社区 / 云盘 / 课堂视频 / 传承交大共用"
+                    connected={Boolean(campus?.connected)}
                   >
-                    <Button size="sm" variant={canvasState?.connected ? 'ghost' : 'primary'} onClick={() => setCanvasOpen(true)}>
-                      {canvasState?.connected ? '管理 Token' : '配置 Canvas'}
+                    <Button size="sm" variant="primary" onClick={() => setCampusOpen(true)}>
+                      {campus?.connected ? '重新登录' : '登录教学网'}
                     </Button>
-                    {canvasState?.token ? (
+                    {campus?.connected ? (
                       <Button
                         size="sm"
                         variant="ghost"
                         onClick={() =>
-                          void call('canvas.disconnect').then(() => {
-                            toast.success('已清除 Canvas Token');
+                          void call('campus.logout').then(() => {
+                            toast.success('已清除校园会话');
                             refreshAccounts();
                           })
                         }
                       >
-                        <LogOut className="size-3.5" /> 清除 Token
+                        <LogOut className="size-3.5" /> 退出
                       </Button>
                     ) : null}
-                    {canvasState?.courses?.length ? (
-                      <span className="text-[0.66rem] text-ink-3">
-                        {canvasState.courses.length} 门课程
-                      </span>
+                    {campus?.connected ? (
+                      <span className="text-[0.66rem] text-ink-3">{campus.cookies} 个 Cookie</span>
                     ) : null}
                   </AccountCard>
                   <AccountCard
@@ -607,21 +608,21 @@ export function Settings() {
                     ) : null}
                   </AccountCard>
                   <AccountCard
-                    icon={Wifi}
-                    title="校园 jAccount（教学信息服务网）"
-                    subtitle="i.sjtu.edu.cn · Canvas / 水源 / 云盘 / 课堂视频 / 传承交大共用"
-                    connected={Boolean(campus?.connected)}
+                    icon={GraduationCap}
+                    title="选课社区"
+                    subtitle="course.sjtu.plus · 使用社区账号（邮箱 / 密码），与 jAccount 相互独立"
+                    connected={Boolean(courseState?.loggedIn)}
                   >
-                    <Button size="sm" variant="primary" onClick={() => setCampusOpen(true)}>
-                      {campus?.connected ? '重新登录' : '登录教学网'}
+                    <Button size="sm" variant="primary" onClick={() => setCourseOpen(true)}>
+                      {courseState?.loggedIn ? '切换账号' : '登录选课社区'}
                     </Button>
-                    {campus?.connected ? (
+                    {courseState?.loggedIn ? (
                       <Button
                         size="sm"
                         variant="ghost"
                         onClick={() =>
-                          void call('campus.logout').then(() => {
-                            toast.success('已清除校园会话');
+                          void call('course.logout').then(() => {
+                            toast.success('已退出选课社区');
                             refreshAccounts();
                           })
                         }
@@ -629,27 +630,16 @@ export function Settings() {
                         <LogOut className="size-3.5" /> 退出
                       </Button>
                     ) : null}
-                    {campus?.connected ? (
-                      <span className="text-[0.66rem] text-ink-3">{campus.cookies} 个 Cookie</span>
-                    ) : null}
-                  </AccountCard>
-                  <AccountCard
-                    icon={Server}
-                    title="水源社区"
-                    subtitle="shuiyuan.sjtu.edu.cn · 自动复用校园 jAccount；API Key 仅作回退"
-                    connected={Boolean(shuiyuanState?.connected)}
-                  >
-                    <Button size="sm" variant="primary" onClick={() => navigate('shuiyuan')}>
-                      前往水源
-                    </Button>
-                    {shuiyuanState?.connected ? (
-                      <span className="text-[0.66rem] text-ink-3">@{shuiyuanState.username}</span>
+                    {courseState?.user ? (
+                      <span className="text-[0.66rem] text-ink-3">
+                        {courseState.user.username || courseState.user.email}
+                      </span>
                     ) : null}
                   </AccountCard>
                 </Section>
                 <div className="rounded-card border border-line bg-surface-2 p-4 text-[0.68rem] leading-relaxed text-ink-3">
                   <ShieldCheck className="mb-1.5 size-4 text-success" />
-                  jAccount Cookie、邮箱密码以及回退用的 Canvas Token / 水源 API Key 均使用 Windows DPAPI 加密保存在本机，不会上传到任何服务器。
+                  jAccount Cookie、邮箱密码与选课社区登录凭据均使用 Windows DPAPI 加密保存在本机，不会上传到任何服务器。
                 </div>
               </>
             ) : null}
@@ -851,7 +841,7 @@ export function Settings() {
                 <Section title="试验功能" description="功能仍在完善，默认关闭；可以随时开关。">
                   <Row
                     label="水源社区"
-                    description="在侧栏显示水源入口；关闭后立即隐藏。"
+                    description="在侧栏显示水源社区入口；关闭后立即隐藏。"
                     control={
                       <Switch
                         checked={settings.experiments.shuiyuan}
@@ -1005,7 +995,7 @@ export function Settings() {
                       </li>
                       <li>不要把口令与备份文件放在同一位置；公共或共享 WebDAV 仍可能被删除、覆盖或篡改。</li>
                       <li>
-                        备份包含 jAccount Cookie、邮箱密码、Canvas Token、水源 API Key 等登录凭据，请像保管密码一样保管加密口令。
+                        备份包含 jAccount Cookie、邮箱密码、Canvas Token、水源社区 API Key 等登录凭据，请像保管密码一样保管加密口令。
                       </li>
                       <li>备份不包含 WebDAV 自身的登录密码；换机恢复后需重新配置 WebDAV。</li>
                     </ul>
@@ -1087,7 +1077,7 @@ export function Settings() {
                       </div>
                       <p className="mt-2 text-[0.64rem] leading-relaxed text-ink-3">
                         生成 `*.hivebackup` 文件后通过 WebDAV PUT 上传；包内包含数据库、设置、项目列表与登录凭据（jAccount
-                        Cookie、邮箱密码、Canvas Token、水源 API Key 等），整个文件已用口令加密。
+                        Cookie、邮箱密码、Canvas Token、水源社区 API Key 等），整个文件已用口令加密。
                       </p>
                     </div>
                     <div className="border-t border-line pt-3">
@@ -1225,33 +1215,43 @@ export function Settings() {
         </div>
       </div>
 
-      <Dialog open={canvasOpen} onOpenChange={setCanvasOpen}>
+      <Dialog open={courseOpen} onOpenChange={setCourseOpen}>
         <DialogContent
-          title="Canvas Token（回退）"
-          description="Canvas 默认复用校园 jAccount，无需 Token。只有在 jAccount 自动登录不可用时，才需要粘贴 Canvas 的 Personal Access Token。"
+          title="登录选课社区"
+          description="选课社区使用自己的账号，与校园 jAccount 无关；凭据使用 Windows DPAPI 加密保存在本机。"
           footer={
             <>
-              <Button variant="ghost" onClick={() => setCanvasOpen(false)}>
+              <Button variant="ghost" onClick={() => setCourseOpen(false)}>
                 取消
               </Button>
-              <Button variant="primary" onClick={() => void saveCanvas()} disabled={!canvasToken.trim()}>
-                保存 Token
+              <Button
+                variant="primary"
+                onClick={() => void saveCourse()}
+                disabled={!courseEmail.trim() || !coursePassword}
+              >
+                登录
               </Button>
             </>
           }
         >
-          <label className="text-xs font-medium text-ink-2">Access Token</label>
+          <label className="text-xs font-medium text-ink-2">邮箱</label>
           <Input
-            type="password"
             className="mt-1.5"
-            value={canvasToken}
-            onChange={(event) => setCanvasToken(event.target.value)}
-            placeholder="粘贴 Canvas Access Token"
+            value={courseEmail}
+            onChange={(event) => setCourseEmail(event.target.value)}
+            placeholder="you@example.com"
+            autoComplete="username"
             autoFocus
           />
-          <p className="mt-3 text-[0.68rem] leading-relaxed text-ink-3">
-            Token 使用 Windows DPAPI 加密，仅保存在本机；不会替代校园 jAccount 登录。同步会读取课程、课件、作业与公告，不会提交作业或修改课程内容。
-          </p>
+          <label className="mt-3 block text-xs font-medium text-ink-2">密码</label>
+          <Input
+            className="mt-1.5"
+            type="password"
+            value={coursePassword}
+            onChange={(event) => setCoursePassword(event.target.value)}
+            placeholder="选课社区密码"
+            autoComplete="current-password"
+          />
         </DialogContent>
       </Dialog>
 
@@ -1437,7 +1437,7 @@ export function Settings() {
                 <p>本应用是本地优先的桌面工具。账号 Token、邮箱密码、校园 Cookie 使用 Windows DPAPI 加密保存在本机，不会上传到任何服务器。</p>
                 <p>联网仅发生在你主动使用校园服务时：Canvas API、交大邮箱 IMAP/SMTP、教学信息服务网、课堂视频与水源社区。请求由本机直接发往对应服务，不经过第三方中转。</p>
                 <p>缓存文件、邮件索引与笔记保存在本机的数据目录中。你可以在设置中清理缓存或导出数据；卸载应用不会自动删除数据目录。</p>
-                <p>邮件与水源正文在沙箱中渲染；外部链接会交给系统浏览器打开。</p>
+                <p>邮件与水源社区正文在沙箱中渲染；外部链接会交给系统浏览器打开。</p>
               </>
             ) : (
               <>

@@ -324,7 +324,7 @@ export function Dashboard() {
                 <StatusChip label="Canvas" ok={canvasConnected} />
                 <StatusChip label="邮箱" ok={mailConnected} />
                 <StatusChip label="教学网" ok={campusConnected} />
-                {shuiyuanEnabled ? <StatusChip label="水源" ok={shuiyuanConnected} /> : null}
+                {shuiyuanEnabled ? <StatusChip label="水源社区" ok={shuiyuanConnected} /> : null}
               </div>
             </div>
             <div className="flex shrink-0 items-center gap-2">

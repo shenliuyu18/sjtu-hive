@@ -697,7 +697,7 @@ let notifications: MockNotification[] = [
   { id: 1, kind: 'ddl', title: 'DDL 临近：机器学习作业 3', body: '机器学习 · 今天 23:59', route: { view: 'canvas', canvasSourceId: 'c1:assignment:301' }, createdAt: isoAt(0, 8), readAt: null, snoozedUntil: null },
   { id: 2, kind: 'mail', title: '新邮件：【机器学习】作业 3 已发布', body: '课程助教', route: { view: 'mail', mailMessageId: 1 }, createdAt: isoAt(0, 8), readAt: null, snoozedUntil: null },
   { id: 3, kind: 'todo', title: '待办即将到期：整理课堂视频笔记', body: '4 天后', route: { view: 'todo', todoId: 'todo-3' }, createdAt: isoAt(-1, 9), readAt: isoAt(0, 9), snoozedUntil: null },
-  { id: 4, kind: 'shuiyuan', title: '水源新回复：机器学习课程项目组队', body: 'zhang', route: { view: 'shuiyuan', shuiyuanTopicId: 1 }, createdAt: isoAt(0, 9), readAt: null, snoozedUntil: null },
+  { id: 4, kind: 'shuiyuan', title: '水源社区新回复：机器学习课程项目组队', body: 'zhang', route: { view: 'shuiyuan', shuiyuanTopicId: 1 }, createdAt: isoAt(0, 9), readAt: null, snoozedUntil: null },
 ];
 
 function emitOptional(emit: ((name: string, ...data: unknown[]) => void) | undefined, name: string, payload: unknown) {
@@ -1220,8 +1220,8 @@ export async function mockCall<T>(
       const topicMatches = shuiyuanTopics.filter((item) => item.title.toLowerCase().includes(text)).slice(0, 5);
       if (topicMatches.length) {
         groups.push({
-          kind: 'shuiyuan', label: '水源',
-          items: topicMatches.map((item) => ({ id: String(item.id), title: item.title, subtitle: '水源主题', route: { view: 'shuiyuan', shuiyuanTopicId: item.id } })),
+          kind: 'shuiyuan', label: '水源社区',
+          items: topicMatches.map((item) => ({ id: String(item.id), title: item.title, subtitle: '水源社区主题', route: { view: 'shuiyuan', shuiyuanTopicId: item.id } })),
         });
       }
       return { groups } as T;

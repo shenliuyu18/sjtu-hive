@@ -58,7 +58,7 @@ export function Onboarding() {
         title={step === 0 ? '欢迎使用 SJTU Hive' : '配置你的校园账户'}
         description={
           step === 0
-            ? '本地优先的上海交大校园桌面：资料、邮箱、日程、课堂视频、水源与工作台。'
+            ? '本地优先的上海交大校园桌面：资料、邮箱、日程、课堂视频、水源社区与工作台。'
             : '所有账户都在应用内手动配置；不会读取其他应用的登录数据。'
         }
         wide
@@ -102,7 +102,7 @@ export function Onboarding() {
               <div>
                 <div className="text-sm font-semibold text-ink">一个应用，收好校园日常</div>
                 <div className="mt-0.5 text-xs leading-relaxed text-ink-3">
-                  Canvas 课件、校园邮箱、日程与 DDL、课堂回放、水源阅读，以及本地的笔记与文件工作台。
+                  Canvas 课件、校园邮箱、日程与 DDL、课堂回放、水源社区阅读，以及本地的笔记与文件工作台。
                 </div>
               </div>
             </div>

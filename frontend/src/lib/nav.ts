@@ -50,7 +50,7 @@ export const navGroups: NavGroup[] = [
   {
     label: '社区',
     items: [
-      { id: 'shuiyuan', label: '水源', short: '水源', icon: MessagesSquare },
+      { id: 'shuiyuan', label: '水源社区', short: '水源社区', icon: MessagesSquare },
       { id: 'course', label: '选课社区', short: '选课', icon: BookOpen },
       { id: 'share', label: '传承交大', short: '传承', icon: Library },
     ],

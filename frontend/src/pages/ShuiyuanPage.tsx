@@ -168,7 +168,7 @@ export function ShuiyuanPage() {
       setMoreUrl(result?.moreUrl ?? null);
       if (!more) setFeed(nextFeed);
     } catch (cause) {
-      toast.error(cause instanceof Error ? cause.message : '读取水源主题失败');
+      toast.error(cause instanceof Error ? cause.message : '读取水源社区主题失败');
     } finally {
       setTopicsLoading(false);
     }
@@ -248,7 +248,7 @@ export function ShuiyuanPage() {
           await loadFeed({ kind: 'latest' });
         }
       })
-      .catch((cause) => toast.error(cause instanceof Error ? cause.message : '读取水源状态失败'))
+      .catch((cause) => toast.error(cause instanceof Error ? cause.message : '读取水源社区状态失败'))
       .finally(() => {
         if (alive) setLoading(false);
       });
@@ -285,7 +285,7 @@ export function ShuiyuanPage() {
       setState(value);
       setAuthOpen(false);
       setPayload('');
-      toast.success('水源已绑定');
+      toast.success('水源社区已绑定');
       await loadStructureAndCounts();
       await loadFeed({ kind: 'latest' });
     } catch (cause) {
@@ -497,7 +497,7 @@ export function ShuiyuanPage() {
   if (loading) {
     return (
       <div className="flex h-full items-center justify-center gap-2 text-xs text-ink-3">
-        <Spinner /> 正在读取水源…
+        <Spinner /> 正在读取水源社区…
       </div>
     );
   }
@@ -505,7 +505,7 @@ export function ShuiyuanPage() {
   if (!state?.connected) {
     return (
       <div className="flex h-full flex-col">
-        <PageHeader title="水源" description="上海交大水源社区阅读、搜索与回复。" eyebrow="Shuiyuan" />
+        <PageHeader title="水源社区" description="上海交大水源社区阅读、搜索与回复。" eyebrow="Shuiyuan" />
         <div className="flex flex-1 items-center justify-center p-6">
           <Card className="max-w-2xl overflow-hidden">
             <div className="flex items-center gap-3 border-b border-line bg-surface-2 px-5 py-4">
@@ -519,7 +519,7 @@ export function ShuiyuanPage() {
             </div>
             <div className="space-y-3 p-5 text-xs leading-relaxed text-ink-2">
               <div className="rounded-lg border border-line bg-surface-2 p-3 text-[0.68rem] text-ink-3">
-                <div>1. 点击「登录并授权」，浏览器会打开水源授权页。</div>
+                <div>1. 点击「登录并授权」，浏览器会打开水源社区授权页。</div>
                 <div>2. 登录并确认授权后，页面会展示一段加密密文。</div>
                 <div>3. 复制密文粘贴到下方，点击「绑定」。</div>
               </div>
@@ -540,7 +540,7 @@ export function ShuiyuanPage() {
                   <Textarea
                     value={payload}
                     onChange={(event) => setPayload(event.target.value)}
-                    placeholder="粘贴水源授权页显示的整段密文"
+                    placeholder="粘贴水源社区授权页显示的整段密文"
                     className="h-28 font-mono text-[0.7rem]"
                   />
                   <div className="flex justify-end">
@@ -564,7 +564,7 @@ export function ShuiyuanPage() {
   return (
     <div className="flex h-full flex-col">
       <PageHeader
-        title="水源"
+        title="水源社区"
         description={`@${state.username ?? ''} · 上海交大水源社区`}
         eyebrow="Shuiyuan"
         actions={
@@ -597,7 +597,7 @@ export function ShuiyuanPage() {
                     void loadFeed({ kind: 'search', query: searchText.trim() });
                   }
                 }}
-                placeholder="搜索水源"
+                placeholder="搜索水源社区"
                 className="h-8 pl-8 text-xs"
               />
             </div>
@@ -792,7 +792,7 @@ export function ShuiyuanPage() {
               <Spinner /> 读取主题…
             </div>
           ) : !detail ? (
-            <EmptyState icon={MessageSquare} title="选择一个主题" description="从中间列表打开水源主题。" />
+            <EmptyState icon={MessageSquare} title="选择一个主题" description="从中间列表打开水源社区主题。" />
           ) : (
             <>
               <div className="shrink-0 border-b border-line bg-surface px-4 py-3">
@@ -963,7 +963,7 @@ export function ShuiyuanPage() {
       >
         <DialogContent
           title={profile ? profile.name || `@${profile.username}` : `@${profileUsername ?? ''}`}
-          description={profile ? `@${profile.username}` : '水源个人主页'}
+          description={profile ? `@${profile.username}` : '水源社区个人主页'}
           wide
         >
           {profileLoading ? (
@@ -1222,7 +1222,7 @@ export function ShuiyuanPage() {
       <Dialog open={messageOpen} onOpenChange={setMessageOpen}>
         <DialogContent
           title="发送私信"
-          description="私信会通过水源站内消息发送。"
+          description="私信会通过水源社区站内消息发送。"
           wide
           footer={
             <>
@@ -1268,7 +1268,7 @@ export function ShuiyuanPage() {
       </Dialog>
 
       <Dialog open={bookmarksOpen} onOpenChange={setBookmarksOpen}>
-        <DialogContent title="我的收藏" description="水源主题收藏。" wide>
+        <DialogContent title="我的收藏" description="水源社区主题收藏。" wide>
           {bookmarks.length === 0 ? (
             <EmptyState compact icon={Bookmark} title="没有收藏" description="在主题右上角点击收藏按钮。" />
           ) : (
@@ -1296,9 +1296,9 @@ export function ShuiyuanPage() {
       </Dialog>
 
       <Dialog open={notificationsOpen} onOpenChange={setNotificationsOpen}>
-        <DialogContent title="水源通知" description="最近的水源站内通知。" wide>
+        <DialogContent title="水源社区通知" description="最近的水源社区站内通知。" wide>
           {notifications.length === 0 ? (
-            <EmptyState compact icon={Bell} title="没有通知" description="水源有新回复或提及时会出现在这里。" />
+            <EmptyState compact icon={Bell} title="没有通知" description="水源社区有新回复或提及时会出现在这里。" />
           ) : (
             <div className="space-y-1">
               {notifications.map((notification) => (
@@ -1318,7 +1318,7 @@ export function ShuiyuanPage() {
                   <Bell className="mt-0.5 size-3.5 shrink-0 text-ink-3" />
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-xs font-medium text-ink">
-                      {notification.fancyTitle ?? '水源通知'}
+                      {notification.fancyTitle ?? '水源社区通知'}
                     </div>
                     <div className="mt-0.5 text-[0.62rem] text-ink-3">
                       {notification.displayUsername ?? ''} · {relativeTime(notification.createdAt)}

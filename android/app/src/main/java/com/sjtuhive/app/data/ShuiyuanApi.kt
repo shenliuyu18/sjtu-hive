@@ -54,7 +54,7 @@ class ShuiyuanApi(private val context: Context) {
         return bucket.keys.any { it.equals("_t", ignoreCase = true) }
     }
 
-    /** 用设置里的 jAccount 静默完成水源 SSO。 */
+    /** 用设置里的 jAccount 静默完成水源社区 SSO。 */
     suspend fun ensureLogin(): Boolean = withContext(Dispatchers.IO) {
         if (isConnected()) return@withContext true
         if (!HiveSession.isLoggedIn(context)) return@withContext false
@@ -118,7 +118,7 @@ class ShuiyuanApi(private val context: Context) {
             jsonBody = payload.toString(),
             headers = mapOf("X-CSRF-Token" to csrfToken()),
         )
-        if (result.code == 403) throw CampusAuthException("没有回复权限，请重新登录水源")
+        if (result.code == 403) throw CampusAuthException("没有回复权限，请重新登录水源社区")
         if (result.code !in 200..299) {
             val message = runCatching {
                 JSONObject(result.body).optJSONArray("errors")?.optString(0)
@@ -158,7 +158,7 @@ class ShuiyuanApi(private val context: Context) {
                 jsonBody = payload.toString(),
                 headers = mapOf("X-CSRF-Token" to csrfToken()),
             )
-            if (result.code == 403) throw CampusAuthException("没有发帖权限，请重新登录水源")
+            if (result.code == 403) throw CampusAuthException("没有发帖权限，请重新登录水源社区")
             if (result.code !in 200..299) {
                 val message = runCatching {
                     JSONObject(result.body).optJSONArray("errors")?.optString(0)
@@ -174,7 +174,7 @@ class ShuiyuanApi(private val context: Context) {
         val csrf = runCatching {
             JSONObject(HiveHttp.get(context, "$ORIGIN/session/csrf.json", "$ORIGIN/")).text("csrf")
         }.getOrNull().orEmpty()
-        if (csrf.isEmpty()) throw CampusAuthException("水源登录已失效，请重新登录")
+        if (csrf.isEmpty()) throw CampusAuthException("水源社区登录已失效，请重新登录")
         return csrf
     }
 

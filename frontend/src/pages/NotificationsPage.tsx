@@ -37,7 +37,7 @@ const kindLabels: Record<string, string> = {
   mail: '邮件',
   ddl: '作业',
   todo: '待办',
-  shuiyuan: '水源',
+  shuiyuan: '水源社区',
   portal: '交我办',
   exam: '考试',
 };

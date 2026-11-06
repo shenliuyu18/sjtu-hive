@@ -158,12 +158,9 @@ export function Sidebar({ badges }: { badges: Partial<Record<AppView, number>> }
           </div>
         ) : null}
         {!collapsed ? (
-          <div className="mt-2 flex items-center justify-between px-2 text-[0.62rem] text-ink-3">
-            <span className="inline-flex items-center gap-1">
-              <Sparkles className="size-3" />
-              v{info?.version ?? '0.1.0'}
-            </span>
-            <span>{settings.experiments.shuiyuan ? '水源已启用' : '水源已关闭'}</span>
+          <div className="mt-2 flex items-center gap-1 px-2 text-[0.62rem] text-ink-3">
+            <Sparkles className="size-3" />
+            v{info?.version ?? '0.1.0'}
           </div>
         ) : null}
       </div>
