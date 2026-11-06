@@ -274,37 +274,26 @@ export function SharePage() {
               <div className="flex h-32 items-center justify-center gap-2 text-xs text-ink-3">
                 <Spinner /> 正在读取资料…
               </div>
-            ) : courses.length === 0 && materials.length === 0 ? (
-              <EmptyState
-                icon={Share2}
-                title="搜索课程开始"
-                description="找到课程后即可浏览该课程下的共享资料。"
-              />
-            ) : courses.length ? (
+            ) : selectedCourse ? (
               <div className="space-y-2">
-                {courses.map((course, index) => (
-                  <button
-                    type="button"
-                    key={String(course.id ?? index)}
-                    onClick={() => void openCourse(course)}
-                    className={cn(
-                      'w-full rounded-xl border border-line bg-surface px-4 py-3 text-left transition-colors hover:border-line-strong',
-                      idOf(selectedCourse) === idOf(course) && 'border-accent/50 bg-accent/5',
-                    )}
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0 text-[0.68rem] font-medium text-ink">
+                    <span className="truncate">{titleOf(selectedCourse)}</span>
+                    <span className="text-ink-3"> · {materials.length} 份资料</span>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => {
+                      setSelectedCourse(null);
+                      setSelectedMaterial(null);
+                      setMaterials([]);
+                    }}
                   >
-                    <div className="truncate text-sm font-semibold text-ink">{titleOf(course)}</div>
-                    <div className="mt-0.5 truncate text-[0.66rem] text-ink-3">
-                      {subtitleOf(course) || '课程'}
-                    </div>
-                  </button>
-                ))}
-              </div>
-            ) : (
-              <div className="space-y-2">
-                <div className="text-[0.68rem] font-medium text-ink">
-                  {titleOf(selectedCourse)} · {materials.length} 份资料
+                    返回搜索结果
+                  </Button>
                 </div>
-                {materials.map((material, index) => (
+                {materials.length ? materials.map((material, index) => (
                   <button
                     type="button"
                     key={String(material.id ?? index)}
@@ -317,8 +306,32 @@ export function SharePage() {
                     <div className="truncate text-sm font-medium text-ink">{titleOf(material)}</div>
                     <div className="mt-0.5 truncate text-[0.64rem] text-ink-3">{materialMeta(material)}</div>
                   </button>
+                )) : (
+                  <EmptyState icon={Share2} title="暂无资料" description="这门课程下还没有共享资料。" />
+                )}
+              </div>
+            ) : courses.length ? (
+              <div className="space-y-2">
+                {courses.map((course, index) => (
+                  <button
+                    type="button"
+                    key={String(course.id ?? index)}
+                    onClick={() => void openCourse(course)}
+                    className="w-full rounded-xl border border-line bg-surface px-4 py-3 text-left transition-colors hover:border-line-strong"
+                  >
+                    <div className="truncate text-sm font-semibold text-ink">{titleOf(course)}</div>
+                    <div className="mt-0.5 truncate text-[0.66rem] text-ink-3">
+                      {subtitleOf(course) || '课程'}
+                    </div>
+                  </button>
                 ))}
               </div>
+            ) : (
+              <EmptyState
+                icon={Share2}
+                title="搜索课程开始"
+                description="找到课程后即可浏览该课程下的共享资料。"
+              />
             )}
           </div>
         </div>

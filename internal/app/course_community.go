@@ -130,6 +130,7 @@ type CourseList struct {
 type CourseReview struct {
 	ID              int64          `json:"id"`
 	CourseID        int64          `json:"course_id"`
+	Course          *CourseSummary `json:"course"`
 	Semester        string         `json:"semester"`
 	Score           string         `json:"score"`
 	Rating          int            `json:"rating"`
@@ -440,6 +441,44 @@ func (c *CourseCommunity) Reviews(ctx context.Context, id int64, page, pageSize 
 	return result, err
 }
 
+func (c *CourseCommunity) RecentReviews(ctx context.Context, page, pageSize int) (CourseReviewList, error) {
+	if page <= 0 {
+		page = 1
+	}
+	if pageSize <= 0 || pageSize > 50 {
+		pageSize = 20
+	}
+	values := url.Values{}
+	values.Set("page", strconv.Itoa(page))
+	values.Set("page_size", strconv.Itoa(pageSize))
+	data, err := c.do(ctx, http.MethodGet, "/review?"+values.Encode(), nil)
+	if err != nil {
+		return CourseReviewList{}, err
+	}
+	var result CourseReviewList
+	err = json.Unmarshal(data, &result)
+	return result, err
+}
+
+func (c *CourseCommunity) Followed(ctx context.Context, page, pageSize int) (CourseList, error) {
+	if page <= 0 {
+		page = 1
+	}
+	if pageSize <= 0 || pageSize > 50 {
+		pageSize = 10
+	}
+	values := url.Values{}
+	values.Set("page", strconv.Itoa(page))
+	values.Set("page_size", strconv.Itoa(pageSize))
+	data, err := c.do(ctx, http.MethodGet, "/course/followed?"+values.Encode(), nil)
+	if err != nil {
+		return CourseList{}, err
+	}
+	var result CourseList
+	err = json.Unmarshal(data, &result)
+	return result, err
+}
+
 func (c *CourseCommunity) ReviewFilters(ctx context.Context, id int64) (CourseReviewFilter, error) {
 	data, err := c.do(ctx, http.MethodGet, fmt.Sprintf("/course/%d/review/filter", id), nil)
 	if err != nil {
@@ -516,6 +555,20 @@ func (c *CourseCommunity) Register(router *Router) {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		return c.Reviews(ctx, id, page, pageSize, semester, rating)
+	})
+	router.Handle("course.recentReviews", func(args []json.RawMessage) (any, error) {
+		page, _, _ := DecodeOptionalArg[int](args, 0)
+		pageSize, _, _ := DecodeOptionalArg[int](args, 1)
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		return c.RecentReviews(ctx, page, pageSize)
+	})
+	router.Handle("course.followed", func(args []json.RawMessage) (any, error) {
+		page, _, _ := DecodeOptionalArg[int](args, 0)
+		pageSize, _, _ := DecodeOptionalArg[int](args, 1)
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		return c.Followed(ctx, page, pageSize)
 	})
 	router.Handle("course.reviewFilters", func(args []json.RawMessage) (any, error) {
 		id, err := DecodeArg[int64](args, 0)

@@ -14,7 +14,7 @@
     !define INFO_PRODUCTNAME "SJTU Hive"
 !endif
 !ifndef INFO_PRODUCTVERSION
-    !define INFO_PRODUCTVERSION "1.2.0.3"
+    !define INFO_PRODUCTVERSION "1.2.0.4"
 !endif
 !ifndef INFO_COPYRIGHT
     !define INFO_COPYRIGHT "© 2026 SJTU Desk contributors"
