@@ -33,7 +33,7 @@ func TestShuiyuanSecureUploadRewrite(t *testing.T) {
 	}
 	defer media.Stop()
 
-	svc := NewShuiyuan(secrets, media, func(string, any) {})
+	svc := NewShuiyuan(secrets, media, nil, func(string, any) {})
 	out := svc.rewriteAssets(shuiyuanCookedSample)
 
 	if !strings.Contains(out, media.BaseURL()) {
@@ -98,7 +98,7 @@ func TestShuiyuanSecureUploadRewrite(t *testing.T) {
 	}
 
 	// Without a bound account the body must stay readable.
-	anonymous := NewShuiyuan(mustEmptySecrets(t), media, func(string, any) {})
+	anonymous := NewShuiyuan(mustEmptySecrets(t), media, nil, func(string, any) {})
 	if got := anonymous.rewriteAssets(shuiyuanCookedSample); strings.Contains(got, media.BaseURL()) {
 		t.Fatalf("unbound service should not proxy: %s", got)
 	} else if !strings.Contains(got, `src="https://shuiyuan.sjtu.edu.cn/secure-uploads/`) {

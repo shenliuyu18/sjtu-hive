@@ -64,6 +64,27 @@ class CanvasApi(private val context: Context) {
 
     fun token(): String = prefs.getString("token", "").orEmpty()
 
+    fun usable(): Boolean {
+        if (token().isNotEmpty()) return true
+        val bucket = HiveSession.store(context)["jaccount.sjtu.edu.cn"].orEmpty()
+        return bucket.keys.any { it.equals("JAAuthCookie", ignoreCase = true) }
+    }
+
+    private var sessionReady = false
+
+    private suspend fun ensureSession() {
+        if (sessionReady) return
+        val result = HiveHttp.raw(
+            context,
+            "https://oc.sjtu.edu.cn/login/openid_connect",
+            "https://oc.sjtu.edu.cn/",
+        )
+        if (result.code !in 200..299) {
+            throw CampusAuthException("请先在设置中登录 jAccount")
+        }
+        sessionReady = true
+    }
+
     fun saveToken(value: String) {
         prefs.edit().putString("token", value.trim()).apply()
     }
@@ -122,15 +143,16 @@ class CanvasApi(private val context: Context) {
     }
 
     suspend fun download(file: CanvasFile, cacheDir: File): File = withContext(Dispatchers.IO) {
+        if (token().isEmpty()) ensureSession()
         val name = file.name.replace(Regex("[\\\\/:*?\"<>|]"), "_").ifBlank { "canvas-file" }
         val directory = File(cacheDir, "canvas-preview").apply { mkdirs() }
         val target = File(directory, name)
         if (target.exists() && target.length() > 0) return@withContext target
-        val request = Request.Builder()
-            .url(file.url)
-            .header("Authorization", "Bearer ${token()}")
-            .build()
-        downloadClient.newCall(request).execute().use { response ->
+        val token = token()
+        val builder = Request.Builder().url(file.url)
+        if (token.isNotEmpty()) builder.header("Authorization", "Bearer $token")
+        val httpClient = if (token.isEmpty()) HiveHttp.client(context) else downloadClient
+        httpClient.newCall(builder.build()).execute().use { response ->
             if (!response.isSuccessful) error("下载失败：HTTP ${response.code}")
             val body = response.body ?: error("下载失败：响应为空")
             val temp = File(directory, "$name.part")
@@ -225,15 +247,16 @@ class CanvasApi(private val context: Context) {
 
     private suspend fun get(path: String): String {
         val token = token()
-        if (token.isEmpty()) throw CampusAuthException("请先填写 Canvas Token")
+        if (token.isEmpty()) ensureSession()
         val result = HiveHttp.raw(
             context,
             "$BASE$path",
             "https://oc.sjtu.edu.cn/",
-            headers = mapOf("Authorization" to "Bearer $token"),
+            headers = if (token.isEmpty()) emptyMap() else mapOf("Authorization" to "Bearer $token"),
         )
         if (result.code == 401 || result.code == 403) {
-            throw CampusAuthException("Canvas Token 无效或已过期")
+            if (token.isEmpty()) sessionReady = false
+            throw CampusAuthException("Canvas 登录已失效，请先在设置中重新登录 jAccount")
         }
         if (result.code !in 200..299) error("Canvas 返回 HTTP ${result.code}")
         return result.body

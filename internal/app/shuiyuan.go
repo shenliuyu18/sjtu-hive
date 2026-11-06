@@ -15,6 +15,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/http/cookiejar"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -168,8 +169,13 @@ type shuiyuanPendingAuth struct {
 type Shuiyuan struct {
 	secrets *SecretStore
 	media   *MediaServer
+	campus  *CampusSession
 	emit    func(string, any)
 	client  *http.Client
+
+	campusMu       sync.Mutex
+	campusClient   *http.Client
+	campusUsername string
 
 	authMu  sync.Mutex
 	pending *shuiyuanPendingAuth
@@ -181,8 +187,8 @@ type Shuiyuan struct {
 	countsAt    time.Time
 }
 
-func NewShuiyuan(secrets *SecretStore, media *MediaServer, emit func(string, any)) *Shuiyuan {
-	return &Shuiyuan{secrets: secrets, media: media, emit: emit, client: &http.Client{Timeout: 30 * time.Second}}
+func NewShuiyuan(secrets *SecretStore, media *MediaServer, campus *CampusSession, emit func(string, any)) *Shuiyuan {
+	return &Shuiyuan{secrets: secrets, media: media, campus: campus, emit: emit, client: &http.Client{Timeout: 30 * time.Second}}
 }
 
 func (s *Shuiyuan) credential() (*ShuiyuanCredential, error) {
@@ -199,12 +205,22 @@ func (s *Shuiyuan) credential() (*ShuiyuanCredential, error) {
 
 func (s *Shuiyuan) State() ShuiyuanState {
 	credential, err := s.credential()
-	if err != nil {
-		return ShuiyuanState{Connected: false}
+	if err == nil {
+		username := credential.Username
+		boundAt := credential.BoundAt
+		return ShuiyuanState{Connected: true, Username: &username, BoundAt: &boundAt}
 	}
-	username := credential.Username
-	boundAt := credential.BoundAt
-	return ShuiyuanState{Connected: true, Username: &username, BoundAt: &boundAt}
+	if s.campus != nil && s.campus.Connected() {
+		s.campusMu.Lock()
+		username := s.campusUsername
+		s.campusMu.Unlock()
+		if username == "" {
+			username = "jAccount"
+		}
+		boundAt := Now()
+		return ShuiyuanState{Connected: true, Username: &username, BoundAt: &boundAt}
+	}
+	return ShuiyuanState{Connected: false}
 }
 
 func (s *Shuiyuan) StartAuth() (map[string]string, error) {
@@ -366,11 +382,142 @@ func (s *Shuiyuan) requestWithKey(method, path string, body any, key, clientID s
 }
 
 func (s *Shuiyuan) request(method, path string, body any) ([]byte, error) {
-	credential, err := s.credential()
+	if credential, err := s.credential(); err == nil {
+		data, keyErr := s.requestWithKey(method, path, body, credential.Key, credential.ClientID)
+		if keyErr == nil {
+			return data, nil
+		}
+		if !errors.Is(keyErr, ErrShuiyuanAuth) {
+			return nil, keyErr
+		}
+	}
+	return s.requestWithCampus(method, path, body)
+}
+
+func (s *Shuiyuan) campusSessionClient() (*http.Client, error) {
+	s.campusMu.Lock()
+	defer s.campusMu.Unlock()
+	if s.campusClient != nil {
+		return s.campusClient, nil
+	}
+	if s.campus == nil || !s.campus.Connected() {
+		return nil, errors.New("请先在设置中登录 jAccount")
+	}
+	jaccount, _ := url.Parse("https://jaccount.sjtu.edu.cn/")
+	jar, _ := cookiejar.New(nil)
+	jar.SetCookies(jaccount, s.campus.Cookies(jaccount))
+	client := &http.Client{Jar: jar, Timeout: 30 * time.Second}
+	loginRequest, _ := http.NewRequest(http.MethodGet, shuiyuanOrigin+"/auth/jaccount", nil)
+	loginRequest.Header.Set("User-Agent", portalUserAgent)
+	response, err := client.Do(loginRequest)
+	if err != nil {
+		return nil, errors.New("连接水源社区失败，请检查网络后重试")
+	}
+	_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 1<<20))
+	_ = response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return nil, errors.New("设置中的 jAccount 登录已失效，请先在设置中重新登录")
+	}
+	currentRequest, _ := http.NewRequest(http.MethodGet, shuiyuanOrigin+"/session/current.json", nil)
+	currentRequest.Header.Set("Accept", "application/json")
+	currentRequest.Header.Set("User-Agent", portalUserAgent)
+	currentResponse, err := client.Do(currentRequest)
+	if err != nil {
+		return nil, errors.New("连接水源社区失败，请检查网络后重试")
+	}
+	currentBody, _ := io.ReadAll(io.LimitReader(currentResponse.Body, 1<<20))
+	_ = currentResponse.Body.Close()
+	var current struct {
+		CurrentUser struct {
+			Username string `json:"username"`
+		} `json:"current_user"`
+	}
+	if err := json.Unmarshal(currentBody, &current); err != nil || current.CurrentUser.Username == "" {
+		return nil, errors.New("jAccount 未能登录水源社区，请先在设置中重新登录")
+	}
+	s.campusClient = client
+	s.campusUsername = current.CurrentUser.Username
+	return client, nil
+}
+
+func (s *Shuiyuan) clearCampusClient() {
+	s.campusMu.Lock()
+	s.campusClient = nil
+	s.campusMu.Unlock()
+}
+
+func (s *Shuiyuan) requestWithCampus(method, path string, body any) ([]byte, error) {
+	client, err := s.campusSessionClient()
 	if err != nil {
 		return nil, err
 	}
-	return s.requestWithKey(method, path, body, credential.Key, credential.ClientID)
+	var reader io.Reader
+	if body != nil {
+		data, err := json.Marshal(body)
+		if err != nil {
+			return nil, err
+		}
+		reader = bytes.NewReader(data)
+	}
+	request, err := http.NewRequestWithContext(context.Background(), method, shuiyuanOrigin+path, reader)
+	if err != nil {
+		return nil, err
+	}
+	request.Header.Set("Accept", "application/json")
+	request.Header.Set("User-Agent", portalUserAgent)
+	request.Header.Set("Referer", shuiyuanOrigin+"/")
+	request.Header.Set("Origin", shuiyuanOrigin)
+	if method != http.MethodGet && method != http.MethodHead {
+		csrf, err := s.campusCSRF(client)
+		if err != nil {
+			return nil, err
+		}
+		request.Header.Set("X-CSRF-Token", csrf)
+		request.Header.Set("Content-Type", "application/json")
+	}
+	response, err := client.Do(request)
+	if err != nil {
+		return nil, errors.New("无法连接水源社区，请检查网络后重试")
+	}
+	defer response.Body.Close()
+	data, _ := io.ReadAll(io.LimitReader(response.Body, 32<<20))
+	if response.StatusCode >= 200 && response.StatusCode < 300 {
+		return data, nil
+	}
+	if response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden {
+		s.clearCampusClient()
+		return nil, ErrShuiyuanAuth
+	}
+	if response.StatusCode == http.StatusTooManyRequests {
+		return nil, errors.New("请求过于频繁，已触发水源限流，请稍后再试")
+	}
+	var payload struct {
+		Errors []string `json:"errors"`
+	}
+	_ = json.Unmarshal(data, &payload)
+	if len(payload.Errors) > 0 {
+		return nil, errors.New("水源返回错误：" + strings.Join(payload.Errors, "；"))
+	}
+	return nil, fmt.Errorf("水源接口返回 HTTP %d", response.StatusCode)
+}
+
+func (s *Shuiyuan) campusCSRF(client *http.Client) (string, error) {
+	request, _ := http.NewRequest(http.MethodGet, shuiyuanOrigin+"/session/csrf.json", nil)
+	request.Header.Set("Accept", "application/json")
+	request.Header.Set("User-Agent", portalUserAgent)
+	response, err := client.Do(request)
+	if err != nil {
+		return "", errors.New("无法连接水源社区，请检查网络后重试")
+	}
+	defer response.Body.Close()
+	data, _ := io.ReadAll(io.LimitReader(response.Body, 1<<20))
+	var payload struct {
+		CSRF string `json:"csrf"`
+	}
+	if err := json.Unmarshal(data, &payload); err != nil || payload.CSRF == "" {
+		return "", errors.New("水源没有返回 CSRF 校验")
+	}
+	return payload.CSRF, nil
 }
 
 func (s *Shuiyuan) SiteStructure() (ShuiyuanSiteStructure, error) {

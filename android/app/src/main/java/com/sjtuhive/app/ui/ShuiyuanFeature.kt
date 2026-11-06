@@ -75,6 +75,10 @@ fun ShuiyuanScreen(context: Context, onClose: () -> Unit) {
     var composing by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
 
+    LaunchedEffect(Unit) {
+        if (!connected && api.ensureLogin()) connected = true
+    }
+
     LaunchedEffect(connected, reload) {
         if (!connected) return@LaunchedEffect
         loading = true

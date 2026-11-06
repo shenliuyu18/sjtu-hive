@@ -3,7 +3,10 @@
 ## 1.2.0-beta.7 — 2026-11-06
 
 - 传承交大改为复用“设置 → 校园登录”中的 jAccount：桌面直接走 OAuth 换令牌，Android 同样静默获取，不再单独要求登录。
-- 只有选课社区继续使用社区邮箱/密码（该站不支持 jAccount）；云盘、课堂视频、教学网等原本复用校园登录的模块保持不变。
+- Canvas 与水源社区改为优先复用校园 jAccount：桌面走 SSO 会话，Android 用已保存的 HiveSession Cookie 静默登录；Canvas Token / 水源 API Key 仅作回退。
+- 教学信息服务网、交大云盘、课堂视频原本已复用校园 jAccount，本次保持不变。
+- 交大邮箱仍使用 IMAP/SMTP 密码（邮件协议不支持 jAccount SSO），无法改用 jAccount。
+- 选课社区使用社区邮箱/密码（该站不支持 jAccount）。
 - 应用显示版本 `1.2.0-beta.7`；Windows 安装器文件版本 `1.2.0.7`。
 
 ## 1.2.0-beta.6 — 2026-11-06

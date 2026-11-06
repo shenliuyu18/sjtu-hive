@@ -413,7 +413,7 @@ func TestCanvasEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer media.Stop()
-	canvas := NewCanvas(db, Paths{CanvasDir: filepath.Join(dir, "cache")}, secrets, media, nil)
+	canvas := NewCanvas(db, Paths{CanvasDir: filepath.Join(dir, "cache")}, secrets, media, nil, nil)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	if _, err := canvas.Configure(ctx, "token"); err != nil {

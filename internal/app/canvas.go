@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/http/cookiejar"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -18,7 +19,7 @@ import (
 	"time"
 )
 
-var ErrCanvasAuth = errors.New("Canvas Token 已失效，请在设置中重新配置")
+var ErrCanvasAuth = errors.New("Canvas 登录已失效，请在设置中重新登录 jAccount 或更新 Canvas Token")
 
 type CanvasCourse struct {
 	ID       int64   `json:"id"`
@@ -59,16 +60,19 @@ type Canvas struct {
 	paths     Paths
 	secrets   *SecretStore
 	media     *MediaServer
+	campus    *CampusSession
 	emit      func(string, any)
 	tokenMu   sync.Mutex
 	token     string
 	tokenRead bool
+	campusMu  sync.Mutex
+	campusCli *canvasClient
 	syncMu    sync.Mutex
 	download  sync.Map
 }
 
-func NewCanvas(db *sql.DB, paths Paths, secrets *SecretStore, media *MediaServer, emit func(string, any)) *Canvas {
-	return &Canvas{db: db, paths: paths, secrets: secrets, media: media, emit: emit}
+func NewCanvas(db *sql.DB, paths Paths, secrets *SecretStore, media *MediaServer, campus *CampusSession, emit func(string, any)) *Canvas {
+	return &Canvas{db: db, paths: paths, secrets: secrets, media: media, campus: campus, emit: emit}
 }
 
 func canvasAPIBase() string {
@@ -116,17 +120,33 @@ func (c *Canvas) clearToken() {
 }
 
 func (c *Canvas) Connected() bool {
-	return c.loadToken() != ""
+	return c.loadToken() != "" || (c.campus != nil && c.campus.Connected())
 }
 
 type canvasClient struct {
-	base   string
-	origin string
-	token  string
-	http   *http.Client
+	base       string
+	origin     string
+	token      string
+	http       *http.Client
+	onAuthFail func()
 }
 
 func (c *Canvas) client() (*canvasClient, error) {
+	if c.campus != nil && c.campus.Connected() {
+		c.campusMu.Lock()
+		cached := c.campusCli
+		c.campusMu.Unlock()
+		if cached != nil {
+			return cached, nil
+		}
+		client, err := c.newCampusClient()
+		if err == nil {
+			c.campusMu.Lock()
+			c.campusCli = client
+			c.campusMu.Unlock()
+			return client, nil
+		}
+	}
 	token := c.loadToken()
 	if token == "" {
 		return nil, errors.New("尚未连接 Canvas")
@@ -139,6 +159,87 @@ func (c *Canvas) client() (*canvasClient, error) {
 	}, nil
 }
 
+func (c *Canvas) clearCampusClient() {
+	c.campusMu.Lock()
+	c.campusCli = nil
+	c.campusMu.Unlock()
+}
+
+func (c *Canvas) newCampusClient() (*canvasClient, error) {
+	jaccount, _ := url.Parse("https://jaccount.sjtu.edu.cn/")
+	jar, _ := cookiejar.New(nil)
+	jar.SetCookies(jaccount, c.campus.Cookies(jaccount))
+	httpClient := &http.Client{Jar: jar, Timeout: 60 * time.Second}
+	request, err := http.NewRequest(http.MethodGet, canvasOrigin()+"/login/openid_connect", nil)
+	if err != nil {
+		return nil, err
+	}
+	request.Header.Set("User-Agent", "SJTU-Desktop/0.1")
+	response, err := httpClient.Do(request)
+	if err != nil {
+		return nil, err
+	}
+	_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 1<<20))
+	_ = response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return nil, ErrCanvasAuth
+	}
+	verify, err := http.NewRequest(http.MethodGet, canvasAPIBase()+"/courses?per_page=1", nil)
+	if err != nil {
+		return nil, err
+	}
+	verify.Header.Set("Accept", "application/json")
+	verify.Header.Set("User-Agent", "SJTU-Desktop/0.1")
+	verified, err := httpClient.Do(verify)
+	if err != nil {
+		return nil, err
+	}
+	_, _ = io.Copy(io.Discard, io.LimitReader(verified.Body, 1<<20))
+	_ = verified.Body.Close()
+	if verified.StatusCode != http.StatusOK {
+		return nil, ErrCanvasAuth
+	}
+	return &canvasClient{
+		base:       canvasAPIBase(),
+		origin:     canvasOrigin(),
+		http:       httpClient,
+		onAuthFail: c.clearCampusClient,
+	}, nil
+}
+
+func (client *canvasClient) applyAuth(request *http.Request) {
+	if client.token != "" {
+		request.Header.Set("Authorization", "Bearer "+client.token)
+		return
+	}
+	if client.http.Jar != nil {
+		for _, cookie := range client.http.Jar.Cookies(request.URL) {
+			request.AddCookie(cookie)
+		}
+	}
+}
+
+func (client *canvasClient) authProxyHeaders(rawURL string) http.Header {
+	headers := http.Header{}
+	if client.token != "" {
+		headers.Set("Authorization", "Bearer "+client.token)
+		return headers
+	}
+	if client.http.Jar != nil {
+		target, err := url.Parse(rawURL)
+		if err == nil {
+			parts := make([]string, 0)
+			for _, cookie := range client.http.Jar.Cookies(target) {
+				parts = append(parts, cookie.Name+"="+cookie.Value)
+			}
+			if len(parts) > 0 {
+				headers.Set("Cookie", strings.Join(parts, "; "))
+			}
+		}
+	}
+	return headers
+}
+
 var ErrCanvasNotFound = errors.New("Canvas 资源不存在或无权限")
 
 func (client *canvasClient) doGet(rawURL string) ([]byte, http.Header, error) {
@@ -147,9 +248,9 @@ func (client *canvasClient) doGet(rawURL string) ([]byte, http.Header, error) {
 		if err != nil {
 			return nil, nil, err
 		}
-		request.Header.Set("Authorization", "Bearer "+client.token)
 		request.Header.Set("Accept", "application/json")
 		request.Header.Set("User-Agent", "SJTU-Desktop/0.1")
+		client.applyAuth(request)
 		response, err := client.http.Do(request)
 		if err != nil {
 			if attempt == 0 {
@@ -162,6 +263,9 @@ func (client *canvasClient) doGet(rawURL string) ([]byte, http.Header, error) {
 		case response.StatusCode == http.StatusUnauthorized:
 			_ = response.Body.Close()
 			slog.Warn("canvas unauthorized", "url", rawURL)
+			if client.onAuthFail != nil {
+				client.onAuthFail()
+			}
 			return nil, nil, ErrCanvasAuth
 		case response.StatusCode == http.StatusForbidden || response.StatusCode == http.StatusNotFound:
 			_ = response.Body.Close()
@@ -991,7 +1095,11 @@ func (c *Canvas) downloadItem(ctx context.Context, item CanvasItem) (string, err
 	if rawURL == "" {
 		return "", errors.New("该文件没有下载地址")
 	}
-	client := &http.Client{Timeout: 5 * time.Minute, CheckRedirect: func(*http.Request, []*http.Request) error {
+	canvasClient, err := c.client()
+	if err != nil {
+		return "", err
+	}
+	client := &http.Client{Timeout: 5 * time.Minute, Jar: canvasClient.http.Jar, CheckRedirect: func(*http.Request, []*http.Request) error {
 		return http.ErrUseLastResponse
 	}}
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
@@ -999,7 +1107,7 @@ func (c *Canvas) downloadItem(ctx context.Context, item CanvasItem) (string, err
 		return "", err
 	}
 	if strings.HasPrefix(rawURL, canvasOrigin()) {
-		request.Header.Set("Authorization", "Bearer "+c.loadToken())
+		canvasClient.applyAuth(request)
 	}
 	request.Header.Set("User-Agent", "SJTU-Desktop/0.1")
 	response, err := client.Do(request)
@@ -1218,7 +1326,11 @@ func (c *Canvas) previewFile(ctx context.Context, item CanvasItem, name, content
 		}
 		headers := http.Header{}
 		if strings.HasPrefix(rawURL, canvasOrigin()) {
-			headers.Set("Authorization", "Bearer "+c.loadToken())
+			proxyClient, clientErr := c.client()
+			if clientErr != nil {
+				return DocumentContent{}, clientErr
+			}
+			headers = proxyClient.authProxyHeaders(rawURL)
 		}
 		resourceURL := c.media.AddProxy(rawURL, headers, &http.Client{Timeout: 0},
 			name, firstNonEmpty(contentType, known), time.Hour)

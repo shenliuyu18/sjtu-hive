@@ -97,7 +97,7 @@ private fun openLink(context: Context, url: String) {
 @Composable
 fun CanvasScreen(context: Context, onClose: () -> Unit) {
     val api = remember { CanvasApi(context) }
-    var configured by remember { mutableStateOf(api.token().isNotEmpty()) }
+    var configured by remember { mutableStateOf(api.usable()) }
     var tokenInput by remember { mutableStateOf("") }
     var courses by remember { mutableStateOf<List<CanvasCourse>>(emptyList()) }
     var course by remember { mutableStateOf<CanvasCourse?>(null) }
@@ -136,7 +136,9 @@ fun CanvasScreen(context: Context, onClose: () -> Unit) {
             }
         }.onFailure {
             error = it.message ?: "Canvas 读取失败"
-            if (it.message?.contains("Token") == true) configured = api.token().isNotEmpty()
+            if (it.message?.contains("Token") == true || it.message?.contains("jAccount") == true) {
+                configured = api.usable()
+            }
         }
         loading = false
     }
@@ -211,7 +213,7 @@ fun CanvasScreen(context: Context, onClose: () -> Unit) {
             ) {
                 Text("配置 Canvas", style = MaterialTheme.typography.titleMedium)
                 Text(
-                    "打开 oc.sjtu.edu.cn → 账户 → 设置 → 新建访问令牌，把生成的 Token 粘贴到这里。Token 只保存在本机。",
+                    "Canvas 会优先复用“设置 → 校园登录”的 jAccount。请先在设置中登录一次；如果自动登录不可用，也可以粘贴 Canvas 访问令牌。",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

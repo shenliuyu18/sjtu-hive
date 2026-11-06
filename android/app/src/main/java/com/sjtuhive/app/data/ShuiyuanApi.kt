@@ -54,6 +54,17 @@ class ShuiyuanApi(private val context: Context) {
         return bucket.keys.any { it.equals("_t", ignoreCase = true) }
     }
 
+    /** 用设置里的 jAccount 静默完成水源 SSO。 */
+    suspend fun ensureLogin(): Boolean = withContext(Dispatchers.IO) {
+        if (isConnected()) return@withContext true
+        if (!HiveSession.isLoggedIn(context)) return@withContext false
+        val result = HiveHttp.raw(context, "$ORIGIN/auth/jaccount", "$ORIGIN/")
+        if (result.code !in 200..299) return@withContext false
+        runCatching {
+            HiveHttp.get(context, "$ORIGIN/latest.json?page=0", "$ORIGIN/latest")
+        }.isSuccess && isConnected()
+    }
+
     suspend fun topics(page: Int = 0): ShuiyuanPage = withContext(Dispatchers.IO) {
         val body = HiveHttp.get(
             context,
