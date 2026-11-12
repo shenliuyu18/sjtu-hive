@@ -87,7 +87,7 @@ export function Sidebar({ badges }: { badges: Partial<Record<AppView, number>> }
   const info = useSettings((state) => state.info);
 
   const hidden = new Set(settings.navHidden);
-  const experimentOK = (id: AppView) => id !== 'shuiyuan' || settings.experiments.shuiyuan;
+  const servicesTestEnabled = settings.servicesTestEnabled;
 
   return (
     <aside
@@ -110,7 +110,7 @@ export function Sidebar({ badges }: { badges: Partial<Record<AppView, number>> }
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto px-2 pb-3">
         {navGroups.map((group) => {
           const items = group.items.filter(
-            (item) => !hidden.has(item.id) && experimentOK(item.id),
+            (item) => !hidden.has(item.id) && (item.id !== 'services' || servicesTestEnabled),
           );
           if (items.length === 0) return null;
           return (

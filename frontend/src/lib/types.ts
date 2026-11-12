@@ -1,10 +1,5 @@
 export type ThemePreference = 'system' | 'light' | 'dark';
 
-export interface Experiments {
-  videoDownload: boolean;
-  shuiyuan: boolean;
-}
-
 export interface SettingsState {
   theme: ThemePreference;
   fontScale: number;
@@ -13,7 +8,7 @@ export interface SettingsState {
   openAtLogin: boolean;
   campusNotifications: boolean;
   taskNotifications: boolean;
-  experiments: Experiments;
+  servicesTestEnabled: boolean;
   navHidden: string[];
   onboardingCompleted: boolean;
   consentVersion: string;
@@ -46,6 +41,7 @@ export type AppView =
   | 'canvas'
   | 'mail'
   | 'timetable'
+  | 'services'
   | 'classroom'
   | 'shuiyuan'
   | 'course'

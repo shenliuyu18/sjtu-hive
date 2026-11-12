@@ -173,6 +173,12 @@ export function MailPage() {
   const [query, setQuery] = useState('');
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [detail, setDetail] = useState<MailMessageDetail | null>(null);
+  const [mailView, setMailView] = useState<'html' | 'text'>('html');
+  useEffect(() => {
+    if (!detail) return;
+    const blocked = (detail.blockedImageHosts?.length ?? 0) > 0;
+    setMailView(blocked && detail.bodyText ? 'text' : 'html');
+  }, [detail?.id]);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -938,13 +944,40 @@ export function MailPage() {
                   这封邮件在本地回收站中，服务器上的原邮件未删除。
                 </div>
               ) : null}
+              {detail.bodyHtml && detail.bodyText ? (
+                <div className="flex shrink-0 items-center justify-between gap-3 border-b border-line bg-surface-2 px-4 py-1.5 text-[0.64rem] text-ink-3">
+                  <span className="min-w-0 truncate">
+                    {(detail.blockedImageHosts?.length ?? 0) > 0
+                      ? `已隐藏 ${detail.blockedImageHosts?.join('、')} 上无法访问的图片，默认显示纯文本。`
+                      : '这封邮件同时包含 HTML 与纯文本正文。'}
+                  </span>
+                  <span className="flex shrink-0 items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => setMailView('text')}
+                      className={mailView === 'text' ? 'rounded px-1.5 py-0.5 text-accent' : 'rounded px-1.5 py-0.5 hover:bg-hover hover:text-ink-2'}
+                    >
+                      纯文本
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setMailView('html')}
+                      className={mailView === 'html' ? 'rounded px-1.5 py-0.5 text-accent' : 'rounded px-1.5 py-0.5 hover:bg-hover hover:text-ink-2'}
+                    >
+                      原始排版
+                    </button>
+                  </span>
+                </div>
+              ) : null}
               <div className="min-h-0 flex-1">
-                {detail.bodyHtml ? (
-                  <HtmlFrame html={detail.bodyHtml} title={detail.subject ?? '邮件正文'} invertInDark />
+                {mailView === 'html' && detail.bodyHtml ? (
+                  <HtmlFrame html={detail.bodyHtml} title={detail.subject ?? '邮件正文'} />
                 ) : detail.bodyText ? (
                   <pre className="scroll-thin selectable h-full overflow-auto whitespace-pre-wrap break-words p-5 font-sans text-[0.82rem] leading-relaxed text-ink-2">
                     {detail.bodyText}
                   </pre>
+                ) : detail.bodyHtml ? (
+                  <HtmlFrame html={detail.bodyHtml} title={detail.subject ?? '邮件正文'} />
                 ) : (
                   <EmptyState icon={MailOpen} title="正文为空" description="这封邮件没有可显示的正文。" />
                 )}

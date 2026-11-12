@@ -18,6 +18,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Assignment
 import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.outlined.Home
@@ -53,10 +54,19 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import android.webkit.WebView
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.sjtuhive.app.data.CampusSession
+import com.sjtuhive.app.data.HiveNotifications
 import com.sjtuhive.app.data.HiveSession
+import com.sjtuhive.app.data.HiveTestFeatures
+import com.sjtuhive.app.data.UpdateApi
 import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import kotlinx.coroutines.delay
@@ -80,14 +90,16 @@ private val HiveColors = darkColorScheme(
     onSurfaceVariant = Color(0xFFA8B0BC),
 )
 
-private data class HiveTab(val label: String, val icon: ImageVector)
+private enum class HiveTabId { Overview, Schedule, Services, CloudPan, Settings }
 
-private val tabs = listOf(
-    HiveTab("概览", Icons.Outlined.Home),
-    HiveTab("日程", Icons.Outlined.CalendarMonth),
-    HiveTab("消息", Icons.Outlined.Inbox),
-    HiveTab("云盘", Icons.Outlined.Cloud),
-    HiveTab("设置", Icons.Outlined.Settings),
+private data class HiveTab(val id: HiveTabId, val label: String, val icon: ImageVector)
+
+private val allTabs = listOf(
+    HiveTab(HiveTabId.Overview, "概览", Icons.Outlined.Home),
+    HiveTab(HiveTabId.Schedule, "日程", Icons.Outlined.CalendarMonth),
+    HiveTab(HiveTabId.Services, "办事", Icons.Outlined.Assignment),
+    HiveTab(HiveTabId.CloudPan, "云盘", Icons.Outlined.Cloud),
+    HiveTab(HiveTabId.Settings, "设置", Icons.Outlined.Settings),
 )
 
 @Composable
@@ -120,8 +132,13 @@ private val TeachingLogin = LoginTarget(
 
 @Composable
 private fun HiveShell() {
-    var selected by remember { mutableIntStateOf(0) }
+    var selectedId by remember { mutableStateOf(HiveTabId.Overview) }
     val context = LocalContext.current
+    var servicesEnabled by remember { mutableStateOf(HiveTestFeatures.servicesEnabled(context)) }
+    val tabs = remember(servicesEnabled) {
+        allTabs.filter { it.id != HiveTabId.Services || servicesEnabled }
+    }
+    val selected = tabs.indexOfFirst { it.id == selectedId }.coerceAtLeast(0)
     var loggedIn by remember { mutableStateOf(HiveSession.isLoggedIn(context)) }
 
     // WebView 体系初始化完成前读不到 WebView 的 Cookie；回到前台时再用它校准登录态，
@@ -146,6 +163,35 @@ private fun HiveShell() {
         // 启动时把所有主要在用的站点会话先续一遍，避免闲置过期后各模块各自报失效。
         CampusSession.refreshAll(context)
         loggedIn = HiveSession.isLoggedIn(context)
+        delay(3000)
+        runCatching { UpdateApi(context).check() }
+            .getOrNull()
+            ?.takeIf { it.available }
+            ?.let {
+                android.widget.Toast.makeText(
+                    context,
+                    "发现新版本 ${it.latest}，可在设置中更新",
+                    android.widget.Toast.LENGTH_LONG,
+                ).show()
+            }
+    }
+    // 通知权限在登录后请求；工作线程负责后台轮询交我办与邮箱。
+    val notificationPermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { }
+    LaunchedEffect(loggedIn) {
+        HiveNotifications.ensureChannel(context)
+        if (loggedIn) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.POST_NOTIFICATIONS,
+                ) != PackageManager.PERMISSION_GRANTED
+            ) {
+                notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
+            HiveNotifications.schedule(context)
+        }
     }
     var loginTarget by remember { mutableStateOf<LoginTarget?>(null) }
     var sessionVersion by remember { mutableIntStateOf(0) }
@@ -156,6 +202,11 @@ private fun HiveShell() {
     var showClassroom by remember { mutableStateOf(false) }
     var showCourseCommunity by remember { mutableStateOf(false) }
     var showShare by remember { mutableStateOf(false) }
+    var showMessages by remember { mutableStateOf(false) }
+    var servicesFullscreen by remember { mutableStateOf(false) }
+    LaunchedEffect(tabs) {
+        if (tabs.none { it.id == selectedId }) selectedId = tabs.first().id
+    }
     val tabStates = rememberSaveableStateHolder()
     // 登录态切换（登录完成/退出）时丢弃旧账号的页面缓存。
     LaunchedEffect(sessionVersion) {
@@ -195,52 +246,59 @@ private fun HiveShell() {
                 .layerBackdrop(backdrop),
         ) {
             // 记住每个页签的滚动位置等可保存状态，切回来不会跳回顶部。
-            tabStates.SaveableStateProvider(selected) {
+            tabStates.SaveableStateProvider(selectedId.name) {
             key(sessionVersion) {
-                when (selected) {
-                    0 -> OverviewScreen(
+                when (selectedId) {
+                    HiveTabId.Overview -> OverviewScreen(
                         context = context,
                         loggedIn = loggedIn,
                         onLogin = { loginTarget = MySjtuLogin },
-                        onNavigate = { selected = it },
+                        onNavigate = { target ->
+                            when (target) {
+                                1 -> selectedId = HiveTabId.Schedule
+                                2 -> if (servicesEnabled) selectedId = HiveTabId.Services
+                            }
+                        },
                         onOpenShuiyuan = { showShuiyuan = true },
                         onOpenCanvas = { showCanvas = true },
                         onOpenEmail = { showEmail = true },
                         onOpenClassroom = { showClassroom = true },
                         onOpenCourse = { showCourseCommunity = true },
                         onOpenShare = { showShare = true },
+                        onOpenMessages = { showMessages = true },
                         onOpenMail = { index ->
                             emailRequest = "INBOX" to index
                             showEmail = true
                         },
                     )
-                    1 -> ScheduleScreen(
+                    HiveTabId.Schedule -> ScheduleScreen(
                         context = context,
                         loggedIn = loggedIn,
                         onLogin = { loginTarget = CalendarLogin },
                         onLoginTeachingSite = { loginTarget = TeachingLogin },
                     )
-                    2 -> MessagesScreen(
+                    HiveTabId.Services -> ServicesScreen(
                         context = context,
                         loggedIn = loggedIn,
                         onLogin = { loginTarget = MySjtuLogin },
-                        onOpenEmail = { folder, index ->
-                            emailRequest = folder to index
-                            showEmail = true
-                        },
+                        onFullscreenChange = { servicesFullscreen = it },
                     )
-                    3 -> CloudPanScreen(
+                    HiveTabId.CloudPan -> CloudPanScreen(
                         context = context,
                         loggedIn = loggedIn,
                         onLogin = { loginTarget = CalendarLogin },
                     )
-                    4 -> SettingsScreen(
+                    HiveTabId.Settings -> SettingsScreen(
                         context = context,
                         loggedIn = loggedIn,
                         onLogin = { loginTarget = CalendarLogin },
                         onLogout = { loggedIn = false },
+                        servicesEnabled = servicesEnabled,
+                        onServicesEnabledChange = { enabled ->
+                            HiveTestFeatures.setServicesEnabled(context, enabled)
+                            servicesEnabled = enabled
+                        },
                     )
-                    else -> PlaceholderContent(tabs[selected])
                 }
             }
             }
@@ -255,6 +313,27 @@ private fun HiveShell() {
         if (showCanvas) {
             CanvasScreen(context = context, onClose = { showCanvas = false })
         }
+        if (showClassroom) {
+            ClassroomScreen(context = context, onClose = { showClassroom = false })
+        }
+        if (showCourseCommunity) {
+            CourseCommunityScreen(context = context, onClose = { showCourseCommunity = false })
+        }
+        if (showShare) {
+            ShareScreen(context = context, onClose = { showShare = false })
+        }
+        if (showMessages) {
+            MessagesScreen(
+                context = context,
+                loggedIn = loggedIn,
+                onLogin = { loginTarget = MySjtuLogin },
+                onOpenEmail = { folder, index ->
+                    emailRequest = folder to index
+                    showEmail = true
+                },
+                onClose = { showMessages = false },
+            )
+        }
         if (showEmail) {
             EmailScreen(
                 context = context,
@@ -265,15 +344,6 @@ private fun HiveShell() {
                 initialFolder = emailRequest?.first,
                 initialIndex = emailRequest?.second,
             )
-        }
-        if (showClassroom) {
-            ClassroomScreen(context = context, onClose = { showClassroom = false })
-        }
-        if (showCourseCommunity) {
-            CourseCommunityScreen(context = context, onClose = { showCourseCommunity = false })
-        }
-        if (showShare) {
-            ShareScreen(context = context, onClose = { showShare = false })
         }
         loginTarget?.let { target ->
             Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
@@ -302,7 +372,8 @@ private fun HiveShell() {
             }
         }
         if (loginTarget == null && !showShuiyuan && !showCanvas && !showEmail && !showClassroom &&
-            !showCourseCommunity && !showShare && PreviewHost.request == null
+            !showCourseCommunity && !showShare && !showMessages && !servicesFullscreen &&
+            PreviewHost.request == null
         ) FloatingBottomBar(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
@@ -310,12 +381,12 @@ private fun HiveShell() {
                 .padding(horizontal = 16.dp, vertical = 18.dp)
                 .height(64.dp),
             selectedIndex = { selected },
-            onSelected = { selected = it },
+            onSelected = { index -> tabs.getOrNull(index)?.let { selectedId = it.id } },
             backdrop = backdrop,
             tabsCount = tabs.size,
         ) {
-            tabs.forEachIndexed { index, tab ->
-                FloatingBottomBarItem(onClick = { selected = index }) {
+            tabs.forEach { tab ->
+                FloatingBottomBarItem(onClick = { selectedId = tab.id }) {
                     Icon(
                         imageVector = tab.icon,
                         contentDescription = tab.label,
@@ -327,45 +398,6 @@ private fun HiveShell() {
         }
         if (PreviewHost.request != null) {
             FilePreviewOverlay()
-        }
-    }
-}
-
-@Composable
-private fun PlaceholderContent(tab: HiveTab) {
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 120.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        item {
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(tab.label, style = MaterialTheme.typography.headlineMedium)
-                Text(
-                    "M3 · 玻璃底栏 · 纯色背景",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-        items((1..14).toList()) { index ->
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(MaterialTheme.colorScheme.surface)
-                    .padding(18.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                Text("${tab.label} · 条目 $index", style = MaterialTheme.typography.bodyLarge)
-                Text(
-                    "占位",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.End,
-                )
-            }
         }
     }
 }

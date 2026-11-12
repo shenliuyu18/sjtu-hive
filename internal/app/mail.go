@@ -50,12 +50,13 @@ type MailMessageSummary struct {
 
 type MailMessageDetail struct {
 	MailMessageSummary
-	FolderID    int64                `json:"folderId"`
-	To          []MailAddress        `json:"to"`
-	Cc          []MailAddress        `json:"cc"`
-	BodyText    *string              `json:"bodyText"`
-	BodyHTML    *string              `json:"bodyHtml"`
-	Attachments []MailAttachmentInfo `json:"attachments"`
+	FolderID          int64                `json:"folderId"`
+	To                []MailAddress        `json:"to"`
+	Cc                []MailAddress        `json:"cc"`
+	BodyText          *string              `json:"bodyText"`
+	BodyHTML          *string              `json:"bodyHtml"`
+	BlockedImageHosts []string             `json:"blockedImageHosts,omitempty"`
+	Attachments       []MailAttachmentInfo `json:"attachments"`
 }
 
 type MailFolder struct {
@@ -151,9 +152,42 @@ type Mail struct {
 }
 
 func NewMail(db *sql.DB, paths Paths, secrets *SecretStore, media *MediaServer, emit func(string, any)) *Mail {
-	return &Mail{
+	mail := &Mail{
 		db: db, paths: paths, secrets: secrets, media: media, emit: emit,
 		status: MailSyncStatus{Phase: "idle"},
+	}
+	mail.normalizeDates()
+	return mail
+}
+
+// normalizeDates rewrites older rows that stored local offsets (+08:00) into UTC,
+// so ORDER BY date stays chronological instead of lexicographic.
+func (m *Mail) normalizeDates() {
+	rows, err := m.db.Query(`SELECT id, date FROM mail_messages
+		WHERE date IS NOT NULL AND date <> '' AND date NOT LIKE '%Z'`)
+	if err != nil {
+		return
+	}
+	type pendingDate struct {
+		id   int64
+		date string
+	}
+	pending := make([]pendingDate, 0, 64)
+	for rows.Next() {
+		var id int64
+		var value sql.NullString
+		if err := rows.Scan(&id, &value); err != nil || !value.Valid {
+			continue
+		}
+		parsed, err := time.Parse(time.RFC3339, value.String)
+		if err != nil {
+			continue
+		}
+		pending = append(pending, pendingDate{id: id, date: parsed.UTC().Format(time.RFC3339)})
+	}
+	_ = rows.Close()
+	for _, item := range pending {
+		_, _ = m.db.Exec(`UPDATE mail_messages SET date = ? WHERE id = ?`, item.date, item.id)
 	}
 }
 
@@ -662,7 +696,7 @@ func (m *Mail) upsertSummary(folderID int64, message *imap.Message) error {
 	}
 	var date any
 	if !envelope.Date.IsZero() {
-		date = envelope.Date.Format(time.RFC3339)
+		date = envelope.Date.UTC().Format(time.RFC3339)
 	}
 	var size any
 	if message.Size > 0 {
@@ -743,7 +777,7 @@ func (m *Mail) ListMessages(folderID int64, query string, limit int) ([]MailMess
 		like := "%" + strings.TrimSpace(query) + "%"
 		args = append(args, like, like, like, like)
 	}
-	sqlText += ` ORDER BY date DESC LIMIT ?`
+	sqlText += ` ORDER BY datetime(date) DESC, id DESC LIMIT ?`
 	args = append(args, limit)
 	rows, err := m.db.Query(sqlText, args...)
 	if err != nil {

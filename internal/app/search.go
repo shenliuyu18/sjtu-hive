@@ -294,7 +294,6 @@ func searchSettings(query string) []SearchItem {
 		{"shuiyuan", "水源账户", "accounts", "水源 社区 discourse"},
 		{"theme", "主题与外观", "appearance", "主题 深色 浅色 字号 缩放 外观"},
 		{"login", "开机自动启动", "general", "开机 启动 登录"},
-		{"experiments", "试验功能", "general", "试验 水源 视频 下载"},
 		{"nav", "导航入口", "general", "侧栏 导航 隐藏"},
 		{"cache", "缓存清理", "storage", "缓存 清理 空间"},
 		{"about", "关于与更新", "about", "版本 更新 条款 隐私"},

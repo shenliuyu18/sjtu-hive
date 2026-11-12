@@ -174,11 +174,14 @@ var mailSanitizer = func() *bluemonday.Policy {
 	return policy
 }()
 
+var mailShellPattern = regexp.MustCompile(`(?is)<!doctype[^>]*>|</?html[^>]*>|</?head[^>]*>|</?body[^>]*>`)
+
 func sanitizeMailHTML(value string) string {
 	if strings.TrimSpace(value) == "" {
 		return ""
 	}
-	return mailSanitizer.Sanitize(value)
+	cleaned := mailSanitizer.Sanitize(value)
+	return mailShellPattern.ReplaceAllString(cleaned, "")
 }
 
 var (
@@ -330,8 +333,10 @@ func (m *Mail) detailFromRow(row mailMessageRow) MailMessageDetail {
 				body = strings.ReplaceAll(body, "cid:"+cid, url)
 			}
 		}
+		body, blockedHosts := filterRemoteImages(body)
 		body = sanitizeMailHTML(body)
 		detail.BodyHTML = &body
+		detail.BlockedImageHosts = blockedHosts
 	}
 	for index := range detail.Attachments {
 		attachment := &detail.Attachments[index]

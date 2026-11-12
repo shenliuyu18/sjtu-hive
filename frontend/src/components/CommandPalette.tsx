@@ -10,6 +10,7 @@ import { call } from '@/lib/bridge';
 import { allNavItems } from '@/lib/nav';
 import type { SearchGroup, SearchResponse, SearchRoute } from '@/lib/types';
 import { useApp } from '@/stores/app';
+import { useSettings } from '@/stores/settings';
 import { cn } from '@/lib/cn';
 
 interface CommandItem {
@@ -25,6 +26,7 @@ export function CommandPalette() {
   const open = useApp((state) => state.commandOpen);
   const setOpen = useApp((state) => state.setCommandOpen);
   const navigate = useApp((state) => state.navigate);
+  const servicesTestEnabled = useSettings((state) => state.state.servicesTestEnabled);
   const [query, setQuery] = useState('');
   const [groups, setGroups] = useState<SearchGroup[]>([]);
   const [active, setActive] = useState(0);
@@ -76,7 +78,9 @@ export function CommandPalette() {
   }, [open, query]);
 
   const commands = useMemo<CommandItem[]>(() => {
-    const nav = allNavItems.map((item) => ({
+    const nav = allNavItems
+      .filter((item) => item.id !== 'services' || servicesTestEnabled)
+      .map((item) => ({
       id: `nav:${item.id}`,
       label: item.label,
       hint: '前往',
@@ -88,7 +92,7 @@ export function CommandPalette() {
     return text
       ? nav.filter((item) => item.label.toLowerCase().includes(text))
       : nav;
-  }, [query]);
+  }, [query, servicesTestEnabled]);
 
   const items = useMemo<CommandItem[]>(() => {
     const searchItems: CommandItem[] = [];

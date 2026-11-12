@@ -54,6 +54,7 @@ type App struct {
 	shuiyuan         *Shuiyuan
 	schoolCalendar   *SchoolCalendar
 	portalMessages   *PortalMessages
+	portalServices   *PortalServices
 	cloudPan         *CloudPan
 	course           *CourseCommunity
 	share            *Share
@@ -253,8 +254,12 @@ func (a *App) registerServices() {
 	a.notifications.SetToaster(systemToast)
 	a.portalMessages = NewPortalMessages(a.db, a.campus, a.notifications, a.schoolCalendar.Account, a.emit)
 	a.portalMessages.Register(a.router)
+	a.portalServices = NewPortalServices(a.campus, a.paths, a.logger, a.emit)
+	a.portalServices.Register(a.router)
 	a.cloudPan = NewCloudPan(a.db, a.secrets, a.campus, a.media, a.emit)
 	a.cloudPan.Register(a.router)
+	a.cloudPan.appCtx = a.ctx
+	a.cloudPan.StartTransfers(a.ctx)
 	a.course = NewCourseCommunity(a.secrets)
 	a.course.Register(a.router)
 	a.share = NewShare(a.secrets, a.campus)
@@ -318,7 +323,7 @@ func (a *App) registerServices() {
 	a.exams.Register(a.router)
 	a.notifications.Register(a.router)
 	a.notifications.StartBackground(a.ctx)
-	a.update = NewUpdate(a.settings)
+	a.update = NewUpdate(a.settings, a.paths, a.emit)
 	a.update.Register(a.router)
 	a.router.Handle("app.exportBackup", func([]json.RawMessage) (any, error) {
 		return a.ExportBackup()
@@ -384,9 +389,6 @@ func (a *App) registerServices() {
 			return nil, err
 		}
 		name, _, _ := DecodeOptionalArg[string](args, 2)
-		if !a.settings.State().Experiments.VideoDownload {
-			return nil, fmt.Errorf("请先在设置 → 通用与通知 → 试验功能中开启「课堂视频下载」")
-		}
 		directory := strings.TrimSpace(a.settings.GetString("videoDownloadDir", ""))
 		if directory == "" {
 			directory = a.paths.DownloadsDir

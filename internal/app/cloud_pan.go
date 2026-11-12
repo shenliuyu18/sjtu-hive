@@ -25,7 +25,7 @@ import (
 	"time"
 )
 
-const cloudPanOrigin = "https://pan.sjtu.edu.cn"
+var cloudPanOrigin = "https://pan.sjtu.edu.cn"
 
 var ErrCloudPanAuth = errors.New("交大云盘会话已失效，请重新登录")
 
@@ -97,6 +97,12 @@ type CloudPan struct {
 	session cloudPanSession
 	token   cloudPanAccessToken
 	state   CloudPanState
+
+	appCtx          context.Context
+	transferCtx     context.Context
+	transferQueue   chan transferQueueItem
+	transferMu      sync.Mutex
+	transferCancels map[string]context.CancelFunc
 }
 
 func NewCloudPan(db *sql.DB, secrets *SecretStore, campus *CampusSession, media *MediaServer, emit func(string, any)) *CloudPan {
@@ -859,11 +865,14 @@ func (p *CloudPan) Register(router *Router) {
 	router.Handle("cloudPan.logout", func([]json.RawMessage) (any, error) {
 		return p.Logout()
 	})
+	p.registerTransferRoutes(router)
+	p.registerShareRoutes(router)
+	p.registerRecycleRoutes(router)
 }
 
 // validateCloudPanMediaURL keeps the presigned download host inside the university
 // even if the drive API is coerced into returning something else.
-func validateCloudPanMediaURL(raw string) error {
+var validateCloudPanMediaURL = func(raw string) error {
 	parsed, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil || parsed.Scheme != "https" {
 		return errors.New("交大云盘返回的下载地址不受信任")
@@ -951,4 +960,3 @@ func maxInt64(value, minimum int64) int64 {
 	}
 	return value
 }
-

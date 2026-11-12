@@ -62,6 +62,7 @@ export interface MailMessageDetail extends MailMessageSummary {
   cc: MailAddress[];
   bodyText: string | null;
   bodyHtml: string | null;
+  blockedImageHosts?: string[];
   attachments: MailAttachmentInfo[];
 }
 

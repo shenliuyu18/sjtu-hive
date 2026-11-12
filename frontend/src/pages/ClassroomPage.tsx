@@ -324,12 +324,6 @@ export function ClassroomPage() {
 
   const downloadSelected = async () => {
     if (!selectedVideo || !selectedStream) return;
-    if (!settings.experiments.videoDownload) {
-      toast.warning('请先在设置中开启「课堂视频下载」', {
-        action: { label: '去设置', onClick: () => navigate('settings', { settingsSection: 'general' }) },
-      });
-      return;
-    }
     const title = selectedCourse
       ? `${selectedCourse.name} ${formatDate(selectedVideo.start, 'M月d日')}`
       : `课堂视频 ${selectedVideo.id}`;
@@ -593,7 +587,7 @@ export function ClassroomPage() {
                         size="sm"
                         variant="ghost"
                         onClick={() => void downloadSelected()}
-                        title={settings.experiments.videoDownload ? '下载当前画面' : '请先在设置中开启视频下载'}
+                        title="下载当前画面"
                       >
                         <Download className="size-3.5" /> 下载
                       </Button>

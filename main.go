@@ -16,6 +16,7 @@ import (
 var assets embed.FS
 
 func main() {
+	app.ApplyStartupPriority()
 	instance := app.NewApp()
 	paths, _ := app.LoadPaths()
 

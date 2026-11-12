@@ -4,8 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -30,10 +33,24 @@ type Notifications struct {
 	mu          sync.Mutex
 	initialized bool
 	toaster     func(title, body string) error
+
+	// 启动后的第一次同步窗口内不逐条弹窗，等汇总后只弹一条。
+	startupSince     string
+	startupActive    atomic.Bool
+	startupRemaining atomic.Int32
+	startupDone      chan struct{}
+	startupDoneOnce  sync.Once
 }
 
 func NewNotifications(db *sql.DB, settings *Settings, shuiyuan *Shuiyuan, logger *slog.Logger, emit func(string, any)) *Notifications {
-	return &Notifications{db: db, settings: settings, shuiyuan: shuiyuan, logger: logger, emit: emit}
+	value := &Notifications{
+		db: db, settings: settings, shuiyuan: shuiyuan, logger: logger, emit: emit,
+		startupSince: time.Now().Format(time.RFC3339),
+		startupDone:  make(chan struct{}),
+	}
+	value.startupActive.Store(true)
+	value.startupRemaining.Store(2) // 本地首轮刷新 + 交我办首轮同步
+	return value
 }
 
 // SetToaster installs the system notification channel (the tray balloon).
@@ -72,7 +89,7 @@ func (n *Notifications) emitChanged() {
 func (n *Notifications) Add(kind, title, body string, route map[string]any, dedupe string, allowToast bool) bool {
 	settings := n.settings.State()
 	switch kind {
-	case "mail", "ddl", "shuiyuan":
+	case "portal", "mail", "ddl", "shuiyuan":
 		if !settings.CampusNotifications {
 			return false
 		}
@@ -93,10 +110,130 @@ func (n *Notifications) Add(kind, title, body string, route map[string]any, dedu
 		return false
 	}
 	n.emitChanged()
-	if allowToast && n.initialized {
+	if allowToast && n.initialized && !n.startupActive.Load() {
 		n.toast(title, body)
 	}
 	return true
+}
+
+type startupNotification struct {
+	Kind  string
+	Title string
+}
+
+// startupNotifications returns entries discovered since this launch, i.e. the
+// messages that arrived while the app was not running. In-app list is unchanged.
+func (n *Notifications) startupNotifications(since string) []startupNotification {
+	rows, err := n.db.Query(`SELECT kind, title FROM notifications
+		WHERE created_at >= ? AND read_at IS NULL
+		AND (snoozed_until IS NULL OR snoozed_until <= ?)
+		ORDER BY created_at DESC`, since, Now())
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	result := []startupNotification{}
+	for rows.Next() {
+		var item startupNotification
+		if rows.Scan(&item.Kind, &item.Title) == nil {
+			result = append(result, item)
+		}
+	}
+	return result
+}
+
+func formatStartupNotification(items []startupNotification) (string, string) {
+	if len(items) == 0 {
+		return "", ""
+	}
+	labels := map[string]string{
+		"portal":   "交我办",
+		"mail":     "邮件",
+		"ddl":      "DDL",
+		"todo":     "待办",
+		"shuiyuan": "水源",
+	}
+	order := []string{"portal", "mail", "ddl", "todo", "shuiyuan"}
+	seen := map[string]bool{}
+	for _, kind := range order {
+		seen[kind] = true
+	}
+	counts := map[string]int{}
+	for _, item := range items {
+		kind := strings.TrimSpace(item.Kind)
+		if kind == "" {
+			kind = "other"
+		}
+		counts[kind]++
+		if !seen[kind] {
+			order = append(order, kind)
+			seen[kind] = true
+		}
+	}
+	parts := []string{}
+	for _, kind := range order {
+		count := counts[kind]
+		if count == 0 {
+			continue
+		}
+		label := labels[kind]
+		if label == "" {
+			label = "消息"
+		}
+		unit := "条"
+		if kind == "mail" {
+			unit = "封"
+		}
+		parts = append(parts, fmt.Sprintf("%s %d %s", label, count, unit))
+	}
+	titles := []string{}
+	for _, item := range items {
+		title := strings.TrimSpace(item.Title)
+		if title == "" {
+			continue
+		}
+		titles = append(titles, title)
+		if len(titles) >= 3 {
+			break
+		}
+	}
+	body := strings.Join(parts, " · ")
+	if len(titles) > 0 {
+		body += " · " + strings.Join(titles, "、")
+	}
+	if len(items) > len(titles) && len(titles) >= 3 {
+		body += " 等"
+	}
+	return fmt.Sprintf("你有 %d 条新消息", len(items)), body
+}
+
+// MarkStartupSourceDone is called by each first-run sync source. The startup
+// summary waits for all of them so slow IMAP/portal syncs are still aggregated.
+func (n *Notifications) MarkStartupSourceDone() {
+	if n.startupRemaining.Add(-1) <= 0 {
+		n.startupDoneOnce.Do(func() { close(n.startupDone) })
+	}
+}
+
+func (n *Notifications) waitStartupSources(ctx context.Context, timeout time.Duration) {
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+	case <-n.startupDone:
+	case <-timer.C:
+	}
+}
+
+func (n *Notifications) flushStartup() {
+	if !n.startupActive.CompareAndSwap(true, false) {
+		return
+	}
+	since := n.startupSince
+	title, body := formatStartupNotification(n.startupNotifications(since))
+	if title != "" {
+		n.toast(title, body)
+	}
 }
 
 func (n *Notifications) List() ([]NotificationItem, error) {
@@ -317,6 +454,21 @@ func strconvFormatInt(value int64) string {
 
 func (n *Notifications) StartBackground(ctx context.Context) {
 	go func() {
+		// 启动窗口内先让首次同步发现新消息，汇总后再弹一条通知。
+		go func() {
+			timer := time.NewTimer(20 * time.Second)
+			defer timer.Stop()
+			select {
+			case <-ctx.Done():
+				return
+			case <-timer.C:
+			}
+			// 再刷一次本地通知，接住启动后才同步完成的邮件。
+			n.Refresh()
+			n.MarkStartupSourceDone()
+			n.waitStartupSources(ctx, 30*time.Second)
+			n.flushStartup()
+		}()
 		time.Sleep(4 * time.Second)
 		n.Refresh()
 		n.RefreshShuiyuan()

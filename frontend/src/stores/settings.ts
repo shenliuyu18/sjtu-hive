@@ -10,7 +10,7 @@ const preferences = [
   'openAtLogin',
   'campusNotifications',
   'taskNotifications',
-  'experiments',
+  'servicesTestEnabled',
   'navHidden',
   'onboardingCompleted',
   'consentVersion',

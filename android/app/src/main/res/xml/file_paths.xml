@@ -3,4 +3,5 @@
     <cache-path name="preview" path="preview/" />
     <cache-path name="canvas" path="canvas-preview/" />
     <cache-path name="pptx" path="pptx-videos/" />
+    <cache-path name="updates" path="updates/" />
 </paths>

@@ -4,21 +4,28 @@ import {
   Download,
   FileText,
   Folder,
+  FolderUp,
   HardDrive,
+  ListChecks,
   LogIn,
   LogOut,
   RefreshCw,
+  Share2,
+  Trash2,
   Upload,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
-import { call, on } from '@/lib/bridge';
+import { call } from '@/lib/bridge';
 import type { CloudPanFile, CloudPanList, CloudPanState, DocumentContent } from '@/lib/models';
 import { formatBytes, formatDate } from '@/lib/format';
 import { cn } from '@/lib/cn';
 import { Button } from '@/components/ui/Button';
 import { Badge, Card, EmptyState, PageHeader, Spinner } from '@/components/ui/Misc';
 import { PreviewPane } from '@/components/content/PreviewPane';
+import { TransferPanel, useCloudTransfers } from '@/components/CloudPanTransfers';
+import { CreateShareDialog, SharesDialog, type ShareTarget } from '@/components/CloudPanShares';
+import { RecycleBinDialog } from '@/components/CloudPanRecycle';
 
 function parentOf(path: string) {
   const index = path.lastIndexOf('/');
@@ -36,17 +43,14 @@ export function CloudPanPage() {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [previewFile, setPreviewFile] = useState<CloudPanFile | null>(null);
-  const [downloading, setDownloading] = useState('');
-  const [uploading, setUploading] = useState('');
-  const [uploadProgress, setUploadProgress] = useState<{ sent: number; total: number } | null>(null);
+  const [transfersOpen, setTransfersOpen] = useState(false);
+  const [shareTarget, setShareTarget] = useState<ShareTarget | null>(null);
+  const [sharesOpen, setSharesOpen] = useState(false);
+  const [sharesVersion, setSharesVersion] = useState(0);
+  const [recycleOpen, setRecycleOpen] = useState(false);
+  const { items: transfers, refresh: refreshTransfers } = useCloudTransfers();
 
-  useEffect(() => {
-    return on('cloudPan.upload.progress', (value) => {
-      const payload = value as { sent?: number; total?: number } | null;
-      if (!payload || typeof payload.sent !== 'number' || typeof payload.total !== 'number') return;
-      setUploadProgress({ sent: payload.sent, total: payload.total });
-    });
-  }, []);
+  const activeTransfers = transfers.filter((item) => item.status === 'running' || item.status === 'queued').length;
 
   const breadcrumbs = useMemo(() => {
     if (!path) return [];
@@ -140,21 +144,14 @@ export function CloudPanPage() {
   };
 
   const download = async (file: CloudPanFile) => {
-    setDownloading(file.path);
     try {
-      const target = await call<string>('app.chooseSaveFile', {
-        title: '保存文件',
-        filename: file.name,
-      });
-      if (!target) {
-        return;
-      }
-      const bytes = await call<string>('cloudPan.download', file.path, target, '');
-      toast.success(`已保存 ${formatBytes(Number(bytes) || file.size)} 到 ${target}`);
+      const dir = (await call<string>('cloudPan.transfer.pickDir')) ?? '';
+      if (!dir) return;
+      await call('cloudPan.transfer.download', [{ path: file.path, name: file.name }], dir, '');
+      setTransfersOpen(true);
+      toast.success('已加入下载队列');
     } catch (cause) {
       toast.error(cause instanceof Error ? cause.message : '下载失败');
-    } finally {
-      setDownloading('');
     }
   };
 
@@ -167,18 +164,35 @@ export function CloudPanPage() {
       return;
     }
     if (!picked) return;
-    const name = picked.split(/[\\/]/).pop() ?? '文件';
-    setUploading(name);
-    setUploadProgress(null);
     try {
-      await call<CloudPanFile>('cloudPan.upload', picked, path, '');
-      toast.success(`已上传 ${name}`);
-      await load(path);
+      await call('cloudPan.transfer.upload', [picked], path, '');
+      setTransfersOpen(true);
+      toast.success('已加入上传队列');
     } catch (cause) {
       toast.error(cause instanceof Error ? cause.message : '上传失败');
-    } finally {
-      setUploading('');
-      setUploadProgress(null);
+    }
+  };
+
+  const remove = async (file: CloudPanFile) => {
+    if (!window.confirm(`删除「${file.name}」？文件会移入云盘回收站。`)) return;
+    try {
+      await call('cloudPan.delete', file.path, '', file.directory, false);
+      toast.success('已移入回收站');
+      await load(path);
+    } catch (cause) {
+      toast.error(cause instanceof Error ? cause.message : '删除失败');
+    }
+  };
+
+  const uploadFolder = async () => {
+    try {
+      const dir = (await call<string>('cloudPan.transfer.pickFolder')) ?? '';
+      if (!dir) return;
+      const result = await call<{ count: number }>('cloudPan.transfer.uploadFolder', dir, path, '');
+      setTransfersOpen(true);
+      toast.success(`已加入 ${result?.count ?? 0} 个文件`);
+    } catch (cause) {
+      toast.error(cause instanceof Error ? cause.message : '上传文件夹失败');
     }
   };
 
@@ -196,13 +210,20 @@ export function CloudPanPage() {
           <>
             {state?.connected ? (
               <>
-                <Button variant="secondary" onClick={() => void upload()} disabled={Boolean(uploading)}>
-                  {uploading ? (
-                    <RefreshCw className="size-4 animate-spin" />
-                  ) : (
-                    <Upload className="size-4" />
-                  )}
-                  上传
+                <Button variant="secondary" onClick={() => void upload()}>
+                  <Upload className="size-4" /> 上传
+                </Button>
+                <Button variant="secondary" onClick={() => void uploadFolder()}>
+                  <FolderUp className="size-4" /> 文件夹
+                </Button>
+                <Button variant="secondary" onClick={() => setSharesOpen(true)}>
+                  <Share2 className="size-4" /> 分享
+                </Button>
+                <Button variant="secondary" onClick={() => setRecycleOpen(true)}>
+                  <Trash2 className="size-4" /> 回收站
+                </Button>
+                <Button variant={transfersOpen ? 'primary' : 'secondary'} onClick={() => setTransfersOpen((value) => !value)}>
+                  <ListChecks className="size-4" /> 传输{activeTransfers > 0 ? ` ${activeTransfers}` : ''}
                 </Button>
                 <Button variant="secondary" onClick={() => void load(path)} disabled={loading}>
                   <RefreshCw className={cn('size-4', loading && 'animate-spin')} /> 刷新
@@ -219,33 +240,6 @@ export function CloudPanPage() {
           </>
         }
       />
-      {uploading ? (
-        <div className="mx-6 mb-3 rounded-lg border border-line bg-surface px-3 py-2 text-[0.68rem] text-ink-2">
-          <div className="flex items-center justify-between gap-3">
-            <span className="truncate">
-              正在上传 {uploading}
-              {uploadProgress ? ` · ${formatBytes(uploadProgress.sent)} / ${formatBytes(uploadProgress.total)}` : ''}
-            </span>
-            <span className="shrink-0">
-              {uploadProgress && uploadProgress.total > 0
-                ? `${Math.min(100, Math.round((uploadProgress.sent / uploadProgress.total) * 100))}%`
-                : '准备中'}
-            </span>
-          </div>
-          <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-line">
-            <div
-              className="h-full rounded-full bg-accent transition-[width]"
-              style={{
-                width: `${
-                  uploadProgress && uploadProgress.total > 0
-                    ? Math.min(100, Math.round((uploadProgress.sent / uploadProgress.total) * 100))
-                    : 3
-                }%`,
-              }}
-            />
-          </div>
-        </div>
-      ) : null}
       {state && !state.connected && state.error ? (
         <div className="mx-6 mb-3 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-[0.68rem] text-warning">
           {state.error}
@@ -340,21 +334,24 @@ export function CloudPanPage() {
                         {file.modifiedAt ? formatDate(file.modifiedAt, 'yyyy-MM-dd HH:mm') : '-'}
                       </td>
                       <td className="px-3 py-2 text-right">
-                        {file.directory ? null : (
+                        <span className="flex items-center justify-end gap-1">
                           <Button
                             size="sm"
                             variant="ghost"
-                            disabled={downloading === file.path}
-                            onClick={() => void download(file)}
-                            title="下载"
+                            onClick={() => setShareTarget({ path: file.path, name: file.name, isFolder: file.directory })}
+                            title="创建分享"
                           >
-                            {downloading === file.path ? (
-                              <Spinner className="size-3.5" />
-                            ) : (
-                              <Download className="size-3.5" />
-                            )}
+                            <Share2 className="size-3.5" />
                           </Button>
-                        )}
+                          {file.directory ? null : (
+                            <Button size="sm" variant="ghost" onClick={() => void download(file)} title="下载">
+                              <Download className="size-3.5" />
+                            </Button>
+                          )}
+                          <Button size="sm" variant="ghost" onClick={() => void remove(file)} title="移入回收站">
+                            <Trash2 className="size-3.5" />
+                          </Button>
+                        </span>
                       </td>
                     </tr>
                   ))}
@@ -376,12 +373,7 @@ export function CloudPanPage() {
             emptyText="点击文件名即可在线预览（PDF / 图片 / 音视频走流式代理）。"
             actions={
               doc?.format === 'binary' && previewFile ? (
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  disabled={downloading === previewFile.path}
-                  onClick={() => void download(previewFile)}
-                >
+                <Button size="sm" variant="secondary" onClick={() => void download(previewFile)}>
                   <Download className="size-3.5" /> 下载到本机
                 </Button>
               ) : undefined
@@ -389,6 +381,16 @@ export function CloudPanPage() {
           />
         </div>
       </div>
+      {transfersOpen ? (
+        <TransferPanel items={transfers} onClose={() => setTransfersOpen(false)} onRefresh={refreshTransfers} />
+      ) : null}
+      <CreateShareDialog
+        target={shareTarget}
+        onClose={() => setShareTarget(null)}
+        onCreated={() => setSharesVersion((value) => value + 1)}
+      />
+      <SharesDialog open={sharesOpen} onClose={() => setSharesOpen(false)} refreshKey={sharesVersion} />
+      <RecycleBinDialog open={recycleOpen} onClose={() => setRecycleOpen(false)} onChanged={() => void load(path)} />
     </div>
   );
 }

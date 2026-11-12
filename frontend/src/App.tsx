@@ -1,6 +1,6 @@
 import { GraduationCap } from 'lucide-react';
 import { useEffect } from 'react';
-import { Toaster } from 'sonner';
+import { Toaster, toast } from 'sonner';
 import { CommandPalette } from '@/components/CommandPalette';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { Onboarding } from '@/components/Onboarding';
@@ -12,6 +12,7 @@ import { Dashboard } from '@/pages/Dashboard';
 import { CanvasPage } from '@/pages/CanvasPage';
 import { MailPage } from '@/pages/MailPage';
 import { TimetablePage } from '@/pages/TimetablePage';
+import { ServicesPage } from '@/pages/ServicesPage';
 import { TodoPage } from '@/pages/TodoPage';
 import { ClassroomPage } from '@/pages/ClassroomPage';
 import { ShuiyuanPage } from '@/pages/ShuiyuanPage';
@@ -51,6 +52,8 @@ function pageFor(view: ReturnType<typeof useApp.getState>['view']) {
       return <MailPage />;
     case 'timetable':
       return <TimetablePage />;
+    case 'services':
+      return <ServicesPage />;
     case 'classroom':
       return <ClassroomPage />;
     case 'shuiyuan':
@@ -76,6 +79,7 @@ export default function App() {
   const ready = useApp((state) => state.ready);
   const view = useApp((state) => state.view);
   const loaded = useSettings((state) => state.loaded);
+  const servicesTestEnabled = useSettings((state) => state.state.servicesTestEnabled);
   const error = useSettings((state) => state.error);
   const unreadNotifications = useNotifications((state) => state.unread);
 
@@ -84,7 +88,26 @@ export default function App() {
     useNotifications.getState().init();
     void call('app.frontendReady').catch(() => {});
     document.title = 'SJTU Hive';
+    const timer = window.setTimeout(() => {
+      void call<{ available: boolean; latest?: string }>('update.check')
+        .then((info) => {
+          if (info?.available) {
+            toast.info(`发现新版本 ${info.latest ?? ''}`, {
+              description: '可在 设置 → 关于 中下载并安装。',
+              duration: 8000,
+            });
+          }
+        })
+        .catch(() => undefined);
+    }, 5000);
+    return () => window.clearTimeout(timer);
   }, []);
+
+  useEffect(() => {
+    if (loaded && view === 'services' && !servicesTestEnabled) {
+      useApp.getState().navigate('dashboard');
+    }
+  }, [loaded, servicesTestEnabled, view]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {

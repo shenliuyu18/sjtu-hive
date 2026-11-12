@@ -98,7 +98,8 @@ type PortalMessages struct {
 	lastError    string
 	unread       int
 
-	syncMu sync.Mutex
+	syncMu      sync.Mutex
+	startupDone sync.Once
 }
 
 func NewPortalMessages(db *sql.DB, campus *CampusSession, notifier *Notifications, account func() string, emit func(string, any)) *PortalMessages {
@@ -136,7 +137,8 @@ func (p *PortalMessages) unreadNotifications() int {
 	return count
 }
 
-func (p *PortalMessages) setError(message string) {	p.mu.Lock()
+func (p *PortalMessages) setError(message string) {
+	p.mu.Lock()
 	p.lastError = message
 	p.mu.Unlock()
 }
@@ -218,6 +220,11 @@ func (p *PortalMessages) bootstrap(ctx context.Context, client *http.Client) err
 }
 
 func (p *PortalMessages) Sync(ctx context.Context) (PortalMessageState, error) {
+	defer p.startupDone.Do(func() {
+		if p.notifier != nil {
+			p.notifier.MarkStartupSourceDone()
+		}
+	})
 	if !p.campus.Connected() {
 		p.setError("尚未登录教学网")
 		return p.State(), errors.New("尚未登录教学网，无法读取交我办消息")

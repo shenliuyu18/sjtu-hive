@@ -50,7 +50,7 @@ export const defaultSettings: SettingsState = {
   openAtLogin: false,
   campusNotifications: true,
   taskNotifications: true,
-  experiments: { videoDownload: true, shuiyuan: true },
+  servicesTestEnabled: false,
   navHidden: [],
   onboardingCompleted: true,
   consentVersion: '2026-10-29',
@@ -1246,8 +1246,45 @@ export async function mockCall<T>(
     case 'notifications.snooze':
     case 'notifications.delete':
       return true as T;
+    case 'services.catalog':
+      return {
+        apps: [
+          { id: '1', code: 'student-card', name: '学生证补办', nameEn: '', department: '学生处', uri: 'https://my.sjtu.edu.cn/ui/app/', categoryName: '学生事务', topCategoryName: '学生事务', iconId: 1, ready: true, favorite: true },
+          { id: '2', code: 'transcript', name: '成绩单打印', nameEn: '', department: '教务处', uri: 'https://my.sjtu.edu.cn/ui/app/', categoryName: '教务', topCategoryName: '教务', iconId: 2, ready: true, favorite: false },
+          { id: '3', code: 'dorm', name: '宿舍报修', nameEn: '', department: '后勤', uri: 'https://my.sjtu.edu.cn/ui/app/', categoryName: '生活服务', topCategoryName: '生活服务', iconId: 3, ready: true, favorite: false },
+        ],
+        categories: [
+          { id: 1, title: '学生事务', count: 1 },
+          { id: 2, title: '教务', count: 1 },
+          { id: 3, title: '生活服务', count: 1 },
+        ],
+        favorites: ['1'],
+        recent: [{ itemId: '2', itemName: '成绩单打印', url: 'https://my.sjtu.edu.cn/ui/app/', updateTimestamp: '' }],
+        fetchedAt: new Date().toISOString(),
+      } as T;
+    case 'services.icons':
+      return {} as T;
+    case 'services.processes':
+      return {
+        items: [
+          { id: 'p1', name: '学生证补办申请', appName: '学生证补办', status: '1', entry: 'https://my.sjtu.edu.cn/ui/app/', stepName: '辅导员审批', percent: 40, updateAt: new Date().toISOString() },
+        ],
+        total: 1,
+      } as T;
+    case 'services.favorite':
+    case 'services.touch':
+    case 'services.open':
+      return { ok: true } as T;
     case 'update.check':
-      return { available: false, current: '0.1.0', message: '浏览器预览模式未配置更新源。' } as T;
+      return {
+        available: false,
+        current: '1.3.0',
+        latest: '1.3.0',
+        notes: '',
+        publishedAt: '',
+        pageURL: 'https://github.com/shenliuyu18/sjtu-hive/releases/latest',
+        message: '浏览器预览模式下不会访问 GitHub。',
+      } as T;
 
     default:
       return null as T;

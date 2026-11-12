@@ -13,3 +13,6 @@ func openAtLoginValue() (bool, error) {
 }
 
 func migrateAutostartName() {}
+
+// ApplyStartupPriority is a no-op outside Windows.
+func ApplyStartupPriority() {}

@@ -9,3 +9,11 @@
 
 # 保留行号，崩溃堆栈可用 mapping.txt 还原。
 -keepattributes SourceFile,LineNumberTable
+
+# WorkManager / Room 通过反射构造数据库与 Worker，R8 全量裁剪会导致启动崩溃
+-keep class androidx.work.impl.WorkDatabase_Impl { <init>(); }
+-keep class * extends androidx.room.RoomDatabase { <init>(); }
+-keepclassmembers class * extends androidx.room.RoomDatabase { <init>(); }
+-keep class * extends androidx.work.ListenableWorker {
+    <init>(android.content.Context, androidx.work.WorkerParameters);
+}

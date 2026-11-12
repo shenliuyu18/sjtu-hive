@@ -10,33 +10,28 @@ import (
 	"sync"
 )
 
-type Experiments struct {
-	VideoDownload bool `json:"videoDownload"`
-	Shuiyuan      bool `json:"shuiyuan"`
-}
-
 // browserDefaultFontPx is the CSS root font size Chromium starts from.
 const browserDefaultFontPx = 16
 
 type SettingsState struct {
-	Theme               string      `json:"theme"`
-	FontScale           int         `json:"fontScale"`
-	FontBasePx          float64     `json:"fontBasePx"`
-	Zoom                float64     `json:"zoom"`
-	OpenAtLogin         bool        `json:"openAtLogin"`
-	CampusNotifications bool        `json:"campusNotifications"`
-	TaskNotifications   bool        `json:"taskNotifications"`
-	Experiments         Experiments `json:"experiments"`
-	NavHidden           []string    `json:"navHidden"`
-	OnboardingCompleted bool        `json:"onboardingCompleted"`
-	ConsentVersion      string      `json:"consentVersion"`
-	VideoDownloadDir    string      `json:"videoDownloadDir"`
-	MailPollMinutes     int         `json:"mailPollMinutes"`
-	AutoSyncMinutes     int         `json:"autoSyncMinutes"`
-	UpdateManifestURL   string      `json:"updateManifestUrl"`
-	CloseAction         string      `json:"closeAction"`
-	SidebarCollapsed    bool        `json:"sidebarCollapsed"`
-	LastView            string      `json:"lastView"`
+	Theme               string   `json:"theme"`
+	FontScale           int      `json:"fontScale"`
+	FontBasePx          float64  `json:"fontBasePx"`
+	Zoom                float64  `json:"zoom"`
+	OpenAtLogin         bool     `json:"openAtLogin"`
+	CampusNotifications bool     `json:"campusNotifications"`
+	TaskNotifications   bool     `json:"taskNotifications"`
+	ServicesTestEnabled bool     `json:"servicesTestEnabled"`
+	NavHidden           []string `json:"navHidden"`
+	OnboardingCompleted bool     `json:"onboardingCompleted"`
+	ConsentVersion      string   `json:"consentVersion"`
+	VideoDownloadDir    string   `json:"videoDownloadDir"`
+	MailPollMinutes     int      `json:"mailPollMinutes"`
+	AutoSyncMinutes     int      `json:"autoSyncMinutes"`
+	UpdateManifestURL   string   `json:"updateManifestUrl"`
+	CloseAction         string   `json:"closeAction"`
+	SidebarCollapsed    bool     `json:"sidebarCollapsed"`
+	LastView            string   `json:"lastView"`
 }
 
 var defaultSettings = map[string]string{
@@ -46,7 +41,7 @@ var defaultSettings = map[string]string{
 	"openAtLogin":         `false`,
 	"campusNotifications": `true`,
 	"taskNotifications":   `true`,
-	"experiments":         `{"videoDownload":false,"shuiyuan":true}`,
+	"servicesTestEnabled": `false`,
 	"navHidden":           `[]`,
 	"onboardingCompleted": `false`,
 	"consentVersion":      `""`,
@@ -66,8 +61,8 @@ var navEntryIDs = map[string]bool{
 
 var viewIDs = map[string]bool{
 	"dashboard": true, "canvas": true, "mail": true, "timetable": true,
-	"classroom": true, "shuiyuan": true, "cloudpan": true, "todo": true, "workspace": true,
-	"settings": true, "notifications": true,
+	"services": true, "classroom": true, "shuiyuan": true, "course": true, "share": true,
+	"cloudpan": true, "todo": true, "workspace": true, "settings": true, "notifications": true,
 }
 
 type Settings struct {
@@ -186,7 +181,7 @@ func (s *Settings) State() SettingsState {
 		OpenAtLogin:         s.boolLocked("openAtLogin", false),
 		CampusNotifications: s.boolLocked("campusNotifications", true),
 		TaskNotifications:   s.boolLocked("taskNotifications", true),
-		Experiments:         s.experimentsLocked(),
+		ServicesTestEnabled: s.boolLocked("servicesTestEnabled", false),
 		NavHidden:           s.stringsLocked("navHidden"),
 		OnboardingCompleted: s.boolLocked("onboardingCompleted", false),
 		ConsentVersion:      s.stringLocked("consentVersion", ""),
@@ -230,15 +225,6 @@ func (s *Settings) stringsLocked(key string) []string {
 		return []string{}
 	}
 	return values
-}
-
-func (s *Settings) experimentsLocked() Experiments {
-	var value Experiments
-	_ = json.Unmarshal([]byte(s.cache["experiments"]), &value)
-	if _, ok := s.cache["experiments"]; !ok {
-		value.Shuiyuan = true
-	}
-	return value
 }
 
 func (s *Settings) stringLocked(key, fallback string) string {
@@ -336,15 +322,10 @@ func canonicalSetting(key string, value any) (string, error) {
 			return "", errors.New("缩放需在 80%–150% 之间")
 		}
 		raw = []byte(strconv.FormatFloat(zoom, 'f', -1, 64))
-	case "openAtLogin", "campusNotifications", "taskNotifications", "onboardingCompleted", "sidebarCollapsed":
+	case "openAtLogin", "campusNotifications", "taskNotifications", "servicesTestEnabled", "onboardingCompleted", "sidebarCollapsed":
 		var flag bool
 		if json.Unmarshal(raw, &flag) != nil {
 			return "", errors.New("开关取值无效")
-		}
-	case "experiments":
-		var exp Experiments
-		if json.Unmarshal(raw, &exp) != nil {
-			return "", errors.New("试验功能取值无效")
 		}
 	case "navHidden":
 		var ids []string

@@ -138,6 +138,22 @@ func (s *CampusSession) SetCookies(requestURL *url.URL, cookies []*http.Cookie) 
 	}
 }
 
+// CookieSnapshot returns every live cookie so an embedded WebView2 window can
+// replay the campus login without asking the user to sign in again.
+func (s *CampusSession) CookieSnapshot() []cookieRecord {
+	now := time.Now()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	result := make([]cookieRecord, 0, len(s.cookies))
+	for _, record := range s.cookies {
+		if !record.Expires.IsZero() && record.Expires.Before(now) {
+			continue
+		}
+		result = append(result, record)
+	}
+	return result
+}
+
 func (s *CampusSession) Cookies(u *url.URL) []*http.Cookie {
 	host := u.Hostname()
 	secure := u.Scheme == "https"

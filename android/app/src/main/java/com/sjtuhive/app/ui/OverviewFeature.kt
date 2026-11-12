@@ -18,6 +18,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Email
 import androidx.compose.material.icons.outlined.FolderShared
+import androidx.compose.material.icons.outlined.Inbox
 import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.MenuBook
 import androidx.compose.material.icons.outlined.PlayCircleOutline
@@ -64,6 +65,7 @@ fun OverviewScreen(
     onOpenClassroom: () -> Unit,
     onOpenCourse: () -> Unit,
     onOpenShare: () -> Unit,
+    onOpenMessages: () -> Unit,
     onOpenMail: (Int) -> Unit,
 ) {
     val today = remember { LocalDate.now() }
@@ -154,13 +156,41 @@ fun OverviewScreen(
             .padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 120.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text("概览", style = MaterialTheme.typography.headlineMedium)
-        Text(
-            "${today.monthValue}月${today.dayOfMonth}日 · ${weekdayName(today)}" +
-                if (loading) " · 正在刷新…" else "",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        Row(
+            Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("概览", style = MaterialTheme.typography.headlineMedium)
+                Text(
+                    "${today.monthValue}月${today.dayOfMonth}日 · ${weekdayName(today)}" +
+                        if (loading) " · 正在刷新…" else "",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Row(
+                Modifier
+                    .clip(RoundedCornerShape(999.dp))
+                    .clickable(onClick = onOpenMessages)
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                androidx.compose.material3.Icon(
+                    Icons.Outlined.Inbox,
+                    contentDescription = "消息",
+                    modifier = Modifier.size(20.dp),
+                )
+                if (unread > 0) {
+                    Text(
+                        unread.toString(),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            }
+        }
 
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             MetricPill("今日课程", todayEvents.size.toString(), Modifier.weight(1f))
@@ -280,7 +310,7 @@ fun OverviewScreen(
                     Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(12.dp))
-                        .clickable { onNavigate(2) }
+                        .clickable { onOpenMessages() }
                         .padding(vertical = 6.dp),
                     verticalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
@@ -341,7 +371,7 @@ fun OverviewScreen(
                     )
                 }
             }
-            TextButton(onClick = { onNavigate(2) }) { Text("查看全部") }
+            TextButton(onClick = { onOpenMessages() }) { Text("查看全部") }
         }
 
         OverviewCard("更多功能") {

@@ -25,7 +25,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useState, type ReactNode } from 'react';
 import { toast } from 'sonner';
-import { call } from '@/lib/bridge';
+import { call, on } from '@/lib/bridge';
 import { formatBytes } from '@/lib/format';
 import type { CampusStatus, MailState } from '@/lib/models';
 import type { SettingsState } from '@/lib/types';
@@ -162,6 +162,20 @@ export function Settings() {
   const [campusOpen, setCampusOpen] = useState(false);
   const [cookieText, setCookieText] = useState('');
   const [termsOpen, setTermsOpen] = useState<'terms' | 'privacy' | null>(null);
+  const [updateInfo, setUpdateInfo] = useState<{
+    available: boolean;
+    current: string;
+    latest: string;
+    notes: string;
+    publishedAt: string;
+    pageURL: string;
+    message: string;
+    asset?: { name: string; url: string; size: number; digest: string };
+  } | null>(null);
+  const [updateOpen, setUpdateOpen] = useState(false);
+  const [updateBusy, setUpdateBusy] = useState<'check' | 'download' | 'install' | ''>('');
+  const [updateProgress, setUpdateProgress] = useState<{ received: number; total: number } | null>(null);
+  const [updateDownloaded, setUpdateDownloaded] = useState('');
   const [mailForm, setMailForm] = useState({
     address: '',
     password: '',
@@ -218,6 +232,14 @@ export function Settings() {
 
   useEffect(() => {
     refreshAccounts();
+  }, []);
+
+  useEffect(() => {
+    return on('update.progress', (value) => {
+      const payload = value as { received?: number; total?: number } | null;
+      if (!payload || typeof payload.received !== 'number') return;
+      setUpdateProgress({ received: payload.received, total: payload.total ?? 0 });
+    });
   }, []);
 
   useEffect(() => {
@@ -473,6 +495,55 @@ export function Settings() {
     void setSetting('navHidden', [...hidden]);
   };
 
+  const checkUpdate = async () => {
+    setUpdateBusy('check');
+    try {
+      const result = await call<NonNullable<typeof updateInfo>>('update.check');
+      setUpdateInfo(result);
+      setUpdateDownloaded('');
+      if (result?.available) setUpdateOpen(true);
+      else toast.success(result?.message ?? '当前已是最新版本');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '检查更新失败');
+    } finally {
+      setUpdateBusy('');
+    }
+  };
+
+  const downloadUpdate = async () => {
+    if (!updateInfo?.asset) return;
+    setUpdateBusy('download');
+    setUpdateProgress(null);
+    try {
+      const result = await call<{ path: string }>(
+        'update.download',
+        updateInfo.asset.url,
+        updateInfo.asset.name,
+        updateInfo.asset.digest,
+      );
+      setUpdateDownloaded(result.path);
+      toast.success('更新包已下载并通过校验');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '下载更新包失败');
+    } finally {
+      setUpdateBusy('');
+    }
+  };
+
+  const installUpdate = async () => {
+    if (!updateDownloaded) return;
+    setUpdateBusy('install');
+    try {
+      await call('update.install', updateDownloaded);
+      toast.success('安装程序已启动，应用即将退出');
+      setTimeout(() => window.runtime?.Quit(), 1200);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '启动安装程序失败');
+    } finally {
+      setUpdateBusy('');
+    }
+  };
+
   const update = (key: keyof SettingsState, value: SettingsState[keyof SettingsState]) => {
     void setSetting(
       key as keyof Pick<
@@ -483,7 +554,7 @@ export function Settings() {
         | 'openAtLogin'
         | 'campusNotifications'
         | 'taskNotifications'
-        | 'experiments'
+        | 'servicesTestEnabled'
         | 'navHidden'
         | 'mailPollMinutes'
         | 'autoSyncMinutes'
@@ -817,29 +888,15 @@ export function Settings() {
                     }
                   />
                 </Section>
-                <Section title="试验功能" description="功能仍在完善，默认关闭；可以随时开关。">
+                <Section title="测试功能" description="仍在测试的功能，默认关闭；可以随时开关。">
                   <Row
-                    label="水源社区"
-                    description="在侧栏显示水源社区入口；关闭后立即隐藏。"
-                    control={
-                      <Switch
-                        checked={settings.experiments.shuiyuan}
-                        onCheckedChange={(value) =>
-                          update('experiments', { ...settings.experiments, shuiyuan: value })
-                        }
-                      />
-                    }
-                  />
-                  <Row
-                    label="课堂视频下载"
-                    description="允许把课堂录像保存到本地。"
+                    label="办事大厅（测试功能）"
+                    description="在侧栏显示交我办办事入口；关闭后立即隐藏。"
                     last
                     control={
                       <Switch
-                        checked={settings.experiments.videoDownload}
-                        onCheckedChange={(value) =>
-                          update('experiments', { ...settings.experiments, videoDownload: value })
-                        }
+                        checked={settings.servicesTestEnabled}
+                        onCheckedChange={(value) => update('servicesTestEnabled', value)}
                       />
                     }
                   />
@@ -1127,6 +1184,27 @@ export function Settings() {
                     label="版本"
                     description={`${info?.name ?? 'SJTU Hive'} · Wails ${info?.wailsVersion ?? 'v2.16.0'}`}
                     control={<Badge variant="accent">v{info?.version ?? '0.1.0'}</Badge>}
+                  />
+                  <Row
+                    label="版本与更新"
+                    description={
+                      updateInfo
+                        ? updateInfo.available
+                          ? `发现 v${updateInfo.latest}；下载后会自动校验 SHA-256。`
+                          : updateInfo.message || '当前已是最新版本。'
+                        : '从 GitHub Releases 检查正式版更新，只下载安装包，不上传任何数据。'
+                    }
+                    control={
+                      updateInfo?.available ? (
+                        <Button size="sm" variant="primary" onClick={() => setUpdateOpen(true)}>
+                          查看 v{updateInfo.latest}
+                        </Button>
+                      ) : (
+                        <Button size="sm" onClick={() => void checkUpdate()} disabled={updateBusy === 'check'}>
+                          {updateBusy === 'check' ? '检查中…' : '检查更新'}
+                        </Button>
+                      )
+                    }
                   />
                   <Row
                     label="本地数据"
@@ -1495,6 +1573,75 @@ export function Settings() {
                 </section>
               </>
             )}
+          </div>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={updateOpen} onOpenChange={setUpdateOpen}>
+        <DialogContent
+          title={updateInfo?.latest ? `发现新版本 ${updateInfo.latest}` : '检查更新'}
+          description={updateInfo?.publishedAt ? `发布于 ${updateInfo.publishedAt.slice(0, 10)}` : undefined}
+          footer={
+            <>
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  void call(
+                    'app.openExternal',
+                    updateInfo?.pageURL || 'https://github.com/shenliuyu18/sjtu-hive/releases/latest',
+                  );
+                }}
+              >
+                打开发布页
+              </Button>
+              {updateDownloaded ? (
+                <Button variant="primary" onClick={() => void installUpdate()} disabled={updateBusy === 'install'}>
+                  {updateBusy === 'install' ? '启动中…' : '立即安装'}
+                </Button>
+              ) : (
+                <Button
+                  variant="primary"
+                  onClick={() => void downloadUpdate()}
+                  disabled={updateBusy === 'download' || !updateInfo?.asset}
+                >
+                  {updateBusy === 'download'
+                    ? `下载中${updateProgress && updateProgress.total > 0 ? ` ${Math.min(100, Math.round((updateProgress.received / updateProgress.total) * 100))}%` : '…'}`
+                    : '下载安装包'}
+                </Button>
+              )}
+            </>
+          }
+        >
+          <div className="space-y-3 text-[0.74rem] leading-relaxed text-ink-2">
+            {updateInfo?.notes ? (
+              <div className="whitespace-pre-wrap rounded-lg border border-line bg-surface-2 px-3 py-2 text-[0.7rem]">
+                {updateInfo.notes}
+              </div>
+            ) : (
+              <p>这个版本没有提供更新说明。</p>
+            )}
+            {updateInfo && !updateInfo.asset ? (
+              <p className="text-warning">该版本没有 Windows 安装包，请到发布页手动下载。</p>
+            ) : null}
+            {updateProgress && updateBusy === 'download' ? (
+              <div className="h-1 overflow-hidden rounded-full bg-line">
+                <div
+                  className="h-full rounded-full bg-accent transition-[width]"
+                  style={{
+                    width: `${
+                      updateProgress.total > 0
+                        ? Math.min(100, Math.round((updateProgress.received / updateProgress.total) * 100))
+                        : 3
+                    }%`,
+                  }}
+                />
+              </div>
+            ) : null}
+            {updateProgress && updateBusy === 'download' ? (
+              <p className="text-[0.66rem] text-ink-3">
+                {formatBytes(updateProgress.received)}
+                {updateProgress.total > 0 ? ` / ${formatBytes(updateProgress.total)}` : ''}
+              </p>
+            ) : null}
           </div>
         </DialogContent>
       </Dialog>

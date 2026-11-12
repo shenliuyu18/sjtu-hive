@@ -8,6 +8,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import com.sjtuhive.app.data.HiveNotifications
 import com.sjtuhive.app.data.HiveSession
 import com.sjtuhive.app.ui.HiveApp
 
@@ -21,6 +22,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         // 升级旧版只保存 my.sjtu 会话的数据：把 WebView 里各个交大站点的 cookie 一起收进来。
         HiveSession.refreshFromWebView(this)
+        HiveNotifications.ensureChannel(this)
+        HiveNotifications.ensureScheduled(this)
         if ((applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0) {
             WebView.setWebContentsDebuggingEnabled(true)
         }

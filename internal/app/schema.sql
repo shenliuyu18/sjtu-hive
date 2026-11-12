@@ -284,3 +284,20 @@ CREATE TABLE IF NOT EXISTS exam_items (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_exam_items_key ON exam_items(semester, source_id);
 CREATE INDEX IF NOT EXISTS idx_exam_items_start ON exam_items(start_at);
+
+CREATE TABLE IF NOT EXISTS cloud_transfers (
+  id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL,
+  name TEXT NOT NULL DEFAULT '',
+  local_path TEXT NOT NULL DEFAULT '',
+  remote_path TEXT NOT NULL DEFAULT '',
+  space_id TEXT NOT NULL DEFAULT '',
+  size INTEGER NOT NULL DEFAULT 0,
+  sent INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'queued',
+  error TEXT NOT NULL DEFAULT '',
+  confirm_key TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT '',
+  updated_at TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_cloud_transfers_created ON cloud_transfers(created_at DESC);

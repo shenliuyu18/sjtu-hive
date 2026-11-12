@@ -64,6 +64,7 @@ fun MessagesScreen(
     loggedIn: Boolean,
     onLogin: () -> Unit,
     onOpenEmail: (folder: String, index: Int) -> Unit,
+    onClose: (() -> Unit)? = null,
 ) {
     val cached = HiveUiCache.messages
     val mailApi = remember { MailApi(context) }
@@ -79,7 +80,9 @@ fun MessagesScreen(
     var mailError by remember { mutableStateOf<String?>(null) }
     val listState = rememberLazyListState()
 
-    BackHandler(enabled = selected != null) { selected = null }
+    BackHandler(enabled = selected != null || onClose != null) {
+        if (selected != null) selected = null else onClose?.invoke()
+    }
 
     LaunchedEffect(loggedIn, reload, mailConfigured) {
         if (!loggedIn) return@LaunchedEffect
@@ -134,6 +137,7 @@ fun MessagesScreen(
         Column(
             Modifier
                 .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background)
                 .padding(24.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
@@ -151,26 +155,34 @@ fun MessagesScreen(
         return
     }
 
-    Column(Modifier.fillMaxSize()) {
+    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         val detail = selected
         if (detail != null) {
             MessageDetail(detail, onBack = { selected = null })
             return@Column
         }
-        Column(Modifier.padding(start = 24.dp, end = 24.dp, top = 12.dp, bottom = 4.dp)) {
-            Text("消息", style = MaterialTheme.typography.headlineMedium)
-            Text(
-                when {
-                    loading || mailLoading -> "正在读取…"
-                    error != null -> error ?: ""
-                    unread > 0 || mailMessages.isNotEmpty() ->
-                        "交我办 $unread · 邮件 ${mailMessages.size}"
-                    messages.isNotEmpty() || mailMessages.isNotEmpty() -> "暂无未读消息"
-                    else -> "暂无未读消息"
-                },
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+        Row(
+            Modifier.fillMaxWidth().padding(start = 24.dp, end = 12.dp, top = 12.dp, bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("消息", style = MaterialTheme.typography.headlineMedium)
+                Text(
+                    when {
+                        loading || mailLoading -> "正在读取…"
+                        error != null -> error ?: ""
+                        unread > 0 || mailMessages.isNotEmpty() ->
+                            "交我办 $unread · 邮件 ${mailMessages.size}"
+                        messages.isNotEmpty() || mailMessages.isNotEmpty() -> "暂无未读消息"
+                        else -> "暂无未读消息"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (onClose != null) {
+                TextButton(onClick = onClose) { Text("关闭") }
+            }
         }
         if (loading && messages.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -318,7 +330,7 @@ fun MessagesScreen(
 @Composable
 private fun MessageDetail(message: PortalMessage, onBack: () -> Unit) {
     val context = LocalContext.current
-    Column(Modifier.fillMaxSize()) {
+    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         Row(
             Modifier
                 .fillMaxWidth()
