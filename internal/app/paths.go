@@ -9,7 +9,7 @@ const (
 	AppName = "SJTU Hive"
 	// LegacyAppName is the pre-rename product name still on disk for upgrades.
 	LegacyAppName = "SJTU"
-	Version       = "1.3.1"
+	Version       = "1.3.2"
 )
 
 type Paths struct {
