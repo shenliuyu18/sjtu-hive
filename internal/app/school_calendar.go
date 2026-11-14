@@ -37,6 +37,10 @@ type SchoolCalendarState struct {
 	Error        string  `json:"error,omitempty"`
 }
 
+// 交我办日历接口收发的时间都是学校本地时间（UTC+8），
+// 与运行机器的时区无关；用 time.Local 会在非中国时区的机器上算错 8 小时。
+var campusZone = time.FixedZone("CST", 8*60*60)
+
 type SchoolCalendar struct {
 	db     *sql.DB
 	campus *CampusSession
@@ -296,8 +300,8 @@ func (s *SchoolCalendar) fetchAndStore(ctx context.Context, start, end time.Time
 	colors["schoolCalendar"] = firstNonEmpty(colors["schoolCalendar"], "#3788D8")
 
 	query := url.Values{}
-	query.Set("startDate", start.In(time.Local).Format("2006-01-02 15:04"))
-	query.Set("endDate", end.In(time.Local).Format("2006-01-02 15:04"))
+	query.Set("startDate", start.In(campusZone).Format("2006-01-02 15:04"))
+	query.Set("endDate", end.In(campusZone).Format("2006-01-02 15:04"))
 	query.Set("weekly", "false")
 	query.Set("ids", "")
 	var payload struct {
@@ -391,7 +395,7 @@ func (s *SchoolCalendar) mapEvent(raw rawSchoolEvent, names, colors map[string]s
 func parseSchoolTime(value string) (time.Time, bool) {
 	value = strings.TrimSpace(value)
 	for _, layout := range []string{"2006-01-02 15:04", "2006-01-02 15:04:05", "2006-01-02", time.RFC3339} {
-		if parsed, err := time.ParseInLocation(layout, value, time.Local); err == nil {
+		if parsed, err := time.ParseInLocation(layout, value, campusZone); err == nil {
 			return parsed, true
 		}
 	}

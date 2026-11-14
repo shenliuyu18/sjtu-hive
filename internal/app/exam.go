@@ -176,11 +176,11 @@ func parseExamTime(value string) (string, string, string, string) {
 		return "", "", "", ""
 	}
 	if match := examTimePattern.FindStringSubmatch(trimmed); match != nil {
-		start, err := time.ParseInLocation("2006-1-2 15:04", match[1]+" "+match[2]+":"+match[3], time.Local)
+		start, err := time.ParseInLocation("2006-1-2 15:04", match[1]+" "+match[2]+":"+match[3], campusZone)
 		if err != nil {
 			return trimmed, "", "", ""
 		}
-		end, err := time.ParseInLocation("2006-1-2 15:04", match[1]+" "+match[4]+":"+match[5], time.Local)
+		end, err := time.ParseInLocation("2006-1-2 15:04", match[1]+" "+match[4]+":"+match[5], campusZone)
 		if err != nil {
 			end = start.Add(2 * time.Hour)
 		}
