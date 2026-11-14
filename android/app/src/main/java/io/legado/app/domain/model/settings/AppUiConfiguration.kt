@@ -15,9 +15,10 @@ data class ThemeSettingsSnapshot(
     val enableProgressiveBlur: Boolean = false,
     val enableDeepPersonalization: Boolean = false,
     val topBarButtonStyle: String = "tonal",
-    val bottomBarBlurRadius: Int = 8,
-    val bottomBarBlurAlpha: Int = 40,
-    val bottomBarLensRadius: Float = 24f,
+    // 对照 Lyrico 的磨砂折射观感：更大模糊半径 + 更透的底 + 更强的透镜折射。
+    val bottomBarBlurRadius: Int = 28,
+    val bottomBarBlurAlpha: Int = 38,
+    val bottomBarLensRadius: Float = 36f,
     val backgroundImageLight: String? = null,
     val backgroundImageDark: String? = null,
     val backgroundImageBlurring: Int = 0,

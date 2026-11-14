@@ -218,11 +218,16 @@ fun FloatingBottomBar(
             onDragStopped = {
                 val targetIndex = targetValue.fastRoundToInt().fastCoerceIn(0, tabsCount - 1)
                 currentIndex = targetIndex
-                animateToValue(targetIndex.toFloat())
+                // 先通知父级切页，再让指示器动画跟上。
+                // 反过来（先 animateToValue 再 onSelected）会让高亮先跑完、内容才换，看起来像卡住。
                 if (targetIndex != selectedIndex()) {
+                    // 只通知父级切页；指示器由下面那条长生命周期协程
+                    // （snapshotFlow -> animateToValue）吸附。
+                    // 手势协程会随重组被取消，在这里做吸附会停在半路。
                     onSelected(targetIndex)
                 } else {
                     onReselected(targetIndex)
+                    animateToValue(targetIndex.toFloat())
                 }
                 animationScope.launch {
                     offsetAnimation.animateTo(0f, spring(1f, 300f, 0.5f))
@@ -242,7 +247,9 @@ fun FloatingBottomBar(
         ).also { holder.instance = it }
     }
 
-    LaunchedEffect(selectedIndex, dampedDragAnimation) {
+    // 只依赖动画对象：selectedIndex 是 lambda，每次重组都是新实例，
+    // 把它放进 key 会导致协程反复重启，正在跑的动画被取消，指示器停在半路。
+    LaunchedEffect(dampedDragAnimation, tabsCount) {
         snapshotFlow { selectedIndex() }.collectLatest { index ->
             currentIndex = index
             dampedDragAnimation.animateToValue(index.toFloat())

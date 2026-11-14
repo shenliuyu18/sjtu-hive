@@ -5,8 +5,12 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.text.TextUtils
+import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.compose.ui.graphics.toArgb
+import io.legado.app.ui.theme.LocalIsDark
+import org.json.JSONObject
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
@@ -37,6 +41,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -51,6 +56,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.sjtuhive.app.data.ShuiyuanApi
 import com.sjtuhive.app.data.ShuiyuanCategory
+import com.sjtuhive.app.data.ShuiyuanPost
 import com.sjtuhive.app.data.ShuiyuanProfile
 import com.sjtuhive.app.data.HiveSession
 import com.sjtuhive.app.data.ShuiyuanTopic
@@ -315,6 +321,10 @@ private fun ShuiyuanTopicScreen(
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
     var detail by remember { mutableStateOf<ShuiyuanTopicDetail?>(null) }
+    var posts by remember { mutableStateOf<List<ShuiyuanPost>>(emptyList()) }
+    var stream by remember { mutableStateOf<List<Long>>(emptyList()) }
+    var loadingMore by remember { mutableStateOf(false) }
+    var webView by remember { mutableStateOf<WebView?>(null) }
     var reply by remember { mutableStateOf("") }
     var sending by remember { mutableStateOf(false) }
     var reload by remember { mutableIntStateOf(0) }
@@ -322,10 +332,51 @@ private fun ShuiyuanTopicScreen(
     LaunchedEffect(topicId, reload) {
         loading = true
         error = null
+        posts = emptyList()
+        stream = emptyList()
+        webView = null
         runCatching { ShuiyuanApi(context).topic(topicId) }
-            .onSuccess { detail = it }
+            .onSuccess {
+                detail = it
+                posts = it.posts
+                stream = it.stream
+            }
             .onFailure { error = it.message ?: "帖子读取失败" }
         loading = false
+    }
+
+    // 划到底部时由页面脚本触发：按 stream 里的 id 补下一批楼层，追加到 WebView。
+    fun loadMorePosts() {
+        if (loadingMore) return
+        val remaining = stream.drop(posts.size)
+        if (remaining.isEmpty()) {
+            webView?.evaluateJavascript("HiveDone()", null)
+            return
+        }
+        loadingMore = true
+        scope.launch {
+            runCatching { api.posts(topicId, remaining.take(20)) }
+                .onSuccess { more ->
+                    if (more.isEmpty()) {
+                        webView?.evaluateJavascript("HiveDone()", null)
+                    } else {
+                        posts = posts + more
+                        val html = more.joinToString("") { buildPostHtml(it) }
+                        webView?.evaluateJavascript(
+                            "HiveAppend(${JSONObject.quote(html)})",
+                            null,
+                        )
+                        if (posts.size >= stream.size) {
+                            webView?.evaluateJavascript("HiveDone()", null)
+                        }
+                    }
+                }
+                .onFailure {
+                    webView?.evaluateJavascript("hiveLoading = false;", null)
+                    Toast.makeText(context, it.message ?: "加载更多失败", Toast.LENGTH_SHORT).show()
+                }
+            loadingMore = false
+        }
     }
 
     BackHandler { onBack() }
@@ -349,6 +400,21 @@ private fun ShuiyuanTopicScreen(
                 modifier = Modifier.weight(1f),
                 maxLines = 1,
             )
+            TextButton(
+                onClick = {
+                    val url = "${ShuiyuanApi.ORIGIN}/t/$topicId"
+                    val share = Intent(Intent.ACTION_SEND).apply {
+                        type = "text/plain"
+                        putExtra(Intent.EXTRA_TEXT, url)
+                    }
+                    runCatching {
+                        context.startActivity(
+                            Intent.createChooser(share, "分享帖子")
+                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                        )
+                    }
+                },
+            ) { Text("分享") }
         }
         Box(Modifier.weight(1f)) {
             when {
@@ -360,7 +426,14 @@ private fun ShuiyuanTopicScreen(
                     color = MaterialTheme.colorScheme.error,
                     modifier = Modifier.padding(24.dp),
                 )
-                detail != null -> TopicHtmlView(context, detail!!, onOpenProfile)
+                detail != null -> TopicHtmlView(
+                    context = context,
+                    detail = detail!!,
+                    isDark = LocalIsDark.current,
+                    onOpenProfile = onOpenProfile,
+                    onLoadMore = { loadMorePosts() },
+                    onReady = { webView = it },
+                )
             }
         }
         Row(
@@ -409,14 +482,26 @@ private fun ShuiyuanTopicScreen(
 private fun TopicHtmlView(
     context: Context,
     detail: ShuiyuanTopicDetail,
+    isDark: Boolean,
     onOpenProfile: (String) -> Unit,
+    onLoadMore: () -> Unit,
+    onReady: (WebView) -> Unit,
 ) {
-    val html = remember(detail) { buildTopicHtml(detail) }
+    val pageBg = MaterialTheme.colorScheme.background.toArgb()
+    val ink = MaterialTheme.colorScheme.onBackground.toArgb()
+    val inkMuted = MaterialTheme.colorScheme.onSurfaceVariant.toArgb()
+    val link = MaterialTheme.colorScheme.primary.toArgb()
+    val rule = MaterialTheme.colorScheme.outlineVariant.toArgb()
+    val html = remember(detail, isDark, pageBg, ink, link) {
+        buildTopicHtml(detail, isDark, pageBg, ink, inkMuted, link, rule)
+    }
+    // html 变化（重新拉取）时重建 WebView，否则新内容不会生效。
+    key(html) {
     AndroidView(
         modifier = Modifier.fillMaxSize(),
         factory = { viewContext ->
             WebView(viewContext).apply {
-                setBackgroundColor(0xFF0F1115.toInt())
+                setBackgroundColor(pageBg)
                 settings.javaScriptEnabled = true
                 settings.domStorageEnabled = true
                 webViewClient = object : WebViewClient() {
@@ -443,10 +528,25 @@ private fun TopicHtmlView(
                         return true
                     }
                 }
+                // 滚到底部时由页面里的脚本回调，向 Compose 侧要下一批楼层。
+                addJavascriptInterface(
+                    object {
+                        @JavascriptInterface
+                        fun loadMore() {
+                            android.os.Handler(android.os.Looper.getMainLooper())
+                                .post { onLoadMore() }
+                        }
+                    },
+                    "HiveBridge",
+                )
+                // factory 处于 compose 阶段，直接写状态不安全，投递到主线程队列。
+                val created = this
+                android.os.Handler(android.os.Looper.getMainLooper()).post { onReady(created) }
                 loadDataWithBaseURL(ShuiyuanApi.ORIGIN, html, "text/html", "UTF-8", null)
             }
         },
     )
+    }
 }
 
 @Composable
@@ -710,25 +810,57 @@ private fun shuiyuanTime(raw: String): String {
     }
 }
 
-private fun buildTopicHtml(detail: ShuiyuanTopicDetail): String {    val title = TextUtils.htmlEncode(detail.title)
-    val posts = detail.posts.joinToString("") { post ->
-        val meta = "#${post.postNumber} · ${TextUtils.htmlEncode(post.username)} · " +
-            shuiyuanTime(post.createdAt)
-        "<article><div class=\"meta\">$meta</div>${post.cooked}</article>"
-    }
+private fun buildPostHtml(post: ShuiyuanPost): String {
+    val meta = "#${post.postNumber} · ${TextUtils.htmlEncode(post.username)} · " +
+        shuiyuanTime(post.createdAt)
+    return "<article><div class=\"meta\">$meta</div>${post.cooked}</article>"
+}
+
+private fun buildTopicHtml(
+    detail: ShuiyuanTopicDetail,
+    isDark: Boolean,
+    pageBg: Int,
+    ink: Int,
+    inkMuted: Int,
+    link: Int,
+    rule: Int,
+): String {
+    fun hex(color: Int): String = "#%06X".format(color and 0xFFFFFF)
+    val title = TextUtils.htmlEncode(detail.title)
+    val posts = detail.posts.joinToString("") { buildPostHtml(it) }
     return """<!DOCTYPE html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
-body{background:#0F1115;color:#E6E8EC;font:16px/1.7 -apple-system,system-ui,sans-serif;margin:0;padding:16px 18px 80px}
+body{background:${hex(pageBg)};color:${hex(ink)};font:16px/1.7 -apple-system,system-ui,sans-serif;margin:0;padding:16px 18px 80px}
 h1{font-size:20px;line-height:1.45;margin:4px 0 16px}
-article{border-bottom:1px solid #23272F;padding:14px 0}
-.meta{color:#8B93A1;font-size:12px;margin-bottom:8px}
+article{border-bottom:1px solid ${hex(rule)};padding:14px 0}
+.meta{color:${hex(inkMuted)};font-size:12px;margin-bottom:8px}
 img{max-width:100%;height:auto;border-radius:10px}
-a{color:#9DC2FF;word-break:break-word}
-pre,code{background:#1D2129;border-radius:8px;padding:2px 6px;white-space:pre-wrap;word-break:break-word;font-size:14px}
+a{color:${hex(link)};word-break:break-word}
+pre,code{background:${hex(rule)};border-radius:8px;padding:2px 6px;white-space:pre-wrap;word-break:break-word;font-size:14px}
 pre{padding:12px}
 blockquote{border-left:3px solid #3A4150;margin:8px 0;padding-left:12px;color:#A8B0BC}
 video,iframe{max-width:100%}
 .onebox,aside.onebox{border:1px solid #23272F;border-radius:10px;padding:10px;margin:8px 0}
-</style></head><body><h1>$title</h1>$posts</body></html>"""
+</style></head><body><h1>$title</h1><div id="hive-posts">$posts</div><div id="hive-end"></div>
+<script>
+var hiveLoading = false, hiveDone = false;
+function HiveAppend(html) {
+  var end = document.getElementById('hive-end');
+  if (end) { end.insertAdjacentHTML('beforebegin', html); }
+  hiveLoading = false;
+}
+function HiveDone() {
+  hiveDone = true;
+  var end = document.getElementById('hive-end');
+  if (end) { end.textContent = '已经到底了'; }
+}
+window.addEventListener('scroll', function () {
+  if (hiveLoading || hiveDone) { return; }
+  if (window.innerHeight + window.scrollY >= document.body.scrollHeight - 320) {
+    hiveLoading = true;
+    if (window.HiveBridge) { window.HiveBridge.loadMore(); }
+  }
+}, { passive: true });
+</script></body></html>"""
 }

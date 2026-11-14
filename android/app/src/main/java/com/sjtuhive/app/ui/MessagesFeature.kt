@@ -90,6 +90,10 @@ fun MessagesScreen(
             mailMessages = emptyList()
             return@LaunchedEffect
         }
+        HiveUiCache.loadPersisted(context)
+        if (mailMessages.isEmpty()) {
+            mailMessages = mailApi.inboxCached("INBOX").filter { !it.seen }
+        }
         mailLoading = true
         mailError = null
         runCatching { mailApi.inbox("INBOX", 12).filter { !it.seen } }
@@ -100,6 +104,7 @@ fun MessagesScreen(
 
     LaunchedEffect(loggedIn, reload) {
         if (!loggedIn) return@LaunchedEffect
+        HiveUiCache.loadPersisted(context)
         val cache = HiveUiCache.messages
         if (reload == 0 && cache != null && HiveUiCache.fresh(cache.at)) {
             messages = cache.messages
@@ -129,6 +134,7 @@ fun MessagesScreen(
             messages = list
             unread = total
             HiveUiCache.messages = HiveUiCache.Messages(list, total, System.currentTimeMillis())
+            HiveUiCache.persist(context)
         }.onFailure { error = it.message ?: "读取失败" }
         loading = false
     }

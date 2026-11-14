@@ -170,8 +170,15 @@ export default function App() {
             <Sidebar badges={{ notifications: unreadNotifications }} />
             <main className="relative min-w-0 flex-1 overflow-hidden bg-bg">
               {error ? (
-                <div className="m-4 rounded-lg border border-danger/30 bg-danger/10 px-4 py-3 text-xs text-danger">
-                  {error}
+                <div className="m-4 flex items-center justify-between gap-3 rounded-lg border border-danger/30 bg-danger/10 px-4 py-3 text-xs text-danger">
+                  <span>{error}</span>
+                  <button
+                    type="button"
+                    onClick={() => window.location.reload()}
+                    className="shrink-0 rounded-md border border-danger/40 px-2 py-1 font-medium hover:bg-danger/10"
+                  >
+                    重新加载
+                  </button>
                 </div>
               ) : null}
               <div key={view} className="h-full">

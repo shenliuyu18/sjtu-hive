@@ -112,33 +112,6 @@ CREATE TABLE IF NOT EXISTS mail_drafts (
   updated_at TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS timetable_sync (
-  semester TEXT PRIMARY KEY,
-  last_synced_at TEXT,
-  semester_start TEXT
-);
-
-CREATE TABLE IF NOT EXISTS timetable_lessons (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  semester TEXT NOT NULL,
-  source_id TEXT NOT NULL,
-  course_code TEXT NOT NULL DEFAULT '',
-  course_name TEXT NOT NULL,
-  class_name TEXT,
-  teacher TEXT,
-  campus TEXT,
-  classroom TEXT,
-  weekday INTEGER NOT NULL,
-  start_period INTEGER NOT NULL,
-  end_period INTEGER NOT NULL,
-  periods_text TEXT NOT NULL DEFAULT '',
-  weeks_text TEXT NOT NULL DEFAULT '',
-  week_numbers TEXT NOT NULL DEFAULT '[]',
-  credits REAL,
-  note TEXT
-);
-CREATE INDEX IF NOT EXISTS idx_timetable_lessons_semester ON timetable_lessons(semester, weekday, start_period);
-
 CREATE TABLE IF NOT EXISTS calendar_events (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   title TEXT NOT NULL,

@@ -89,6 +89,22 @@ class MailApi(private val context: Context) {
         }
     }
 
+    /** 冷启动先读磁盘快照，随后页面会刷新覆盖。 */
+    fun inboxCached(folderName: String = "INBOX"): List<MailSummary> =
+        HiveCache.getArray(context, "mail:inbox:$folderName")?.let { array ->
+            (0 until array.length()).mapNotNull { i ->
+                array.optJSONObject(i)?.let { json ->
+                    MailSummary(
+                        index = json.optInt("index"),
+                        subject = json.optString("subject"),
+                        from = json.optString("from"),
+                        date = json.optString("date"),
+                        seen = json.optBoolean("seen"),
+                    )
+                }
+            }
+        } ?: emptyList()
+
     suspend fun inbox(folderName: String = "INBOX", limit: Int = 30): List<MailSummary> =
         withContext(Dispatchers.IO) {
             val account = account() ?: throw CampusAuthException("请先配置邮箱账号")
@@ -108,6 +124,21 @@ class MailApi(private val context: Context) {
                         date = formatDate(message.sentDate ?: message.receivedDate),
                         seen = message.flags?.contains(javax.mail.Flags.Flag.SEEN) == true,
                     )
+                }
+                // 写入磁盘缓存，冷启动时先展示
+                runCatching {
+                    val snapshot = org.json.JSONArray()
+                    result.forEach { item ->
+                        snapshot.put(
+                            org.json.JSONObject()
+                                .put("index", item.index)
+                                .put("subject", item.subject)
+                                .put("from", item.from)
+                                .put("date", item.date)
+                                .put("seen", item.seen),
+                        )
+                    }
+                    HiveCache.putArray(context, "mail:inbox:$folderName", snapshot)
                 }
                 result
             }

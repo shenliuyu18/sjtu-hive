@@ -124,10 +124,20 @@ class ClassroomApi(private val context: Context) {
             val uri = runCatching { URI(raw) }.getOrNull() ?: continue
             if (uri.scheme != "https" || uri.host != "live.sjtu.edu.cn") continue
             if (!uri.path.orEmpty().lowercase().endsWith(".mp4")) continue
+            // 与桌面端一致：走本地流代理（代理侧注入 Referer/Origin 并透传 Range），
+            // 避免部分录像直连 CDN 时缓冲异常。
+            val proxied = HiveStreamProxy.register(
+                raw,
+                mapOf(
+                    "Referer" to "https://v.sjtu.edu.cn/jy-application-resourcemanage-ui/",
+                    "Origin" to "https://v.sjtu.edu.cn",
+                    "Accept" to "*/*",
+                ),
+            )
             streams += ClassroomStream(
                 view = item.optInt("viewNum"),
                 duration = item.optDouble("vodTime", 0.0),
-                url = raw,
+                url = proxied,
             )
         }
         streams.sortedBy { it.view }

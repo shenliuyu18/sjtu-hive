@@ -320,7 +320,8 @@ export function CourseCommunityPage() {
   useEffect(() => {
     void call<CourseState>('course.state')
       .then((value) => {
-        setState(value);
+        // call 返回 null（如浏览器预览模式下无 mock 实现）时也要收尾，避免一直停在加载态
+        setState(value ?? { loggedIn: false, user: null });
         if (value?.loggedIn) {
           void loadBase();
           void loadHome();

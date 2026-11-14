@@ -611,7 +611,8 @@ export function ClassroomPage() {
                         <video
                           key={`${selectedVideo.id}-${selectedStream.view}`}
                           ref={videoRef}
-                          src={selectedStream.playbackUrl}
+                          // 地址未就绪时传 undefined，避免空字符串触发浏览器重复下载整页的告警
+                          src={selectedStream.playbackUrl || undefined}
                           controls
                           playsInline
                           preload="metadata"
@@ -638,7 +639,7 @@ export function ClassroomPage() {
                           <video
                             key={`${selectedVideo.id}-${secondaryStream.view}`}
                             ref={secondaryVideoRef}
-                            src={secondaryStream.playbackUrl}
+                            src={secondaryStream.playbackUrl || undefined}
                             muted
                             playsInline
                             preload="metadata"

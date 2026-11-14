@@ -304,7 +304,8 @@ fun CloudPanScreen(
                                     PreviewRequest(
                                         title = file.name,
                                         fileName = file.name,
-                                        load = { api.downloadToCache(file.path, file.name) },
+                                        expectedSize = file.size,
+                                        load = { api.downloadToCache(file.path, file.name, file.size) },
                                         download = {
                                             CloudPanTransfers.enqueueDownload(
                                                 file.path,

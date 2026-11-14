@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
+import android.view.View
 import android.graphics.Bitmap
 import android.graphics.Color as AndroidColor
 import android.graphics.pdf.PdfRenderer
@@ -14,8 +15,13 @@ import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Toast
-import android.widget.VideoView
+import com.sjtuhive.app.ui.video.HiveVideoPlayer
+import com.sjtuhive.app.ui.video.MediaPlayerVideo
+import com.sjtuhive.app.ui.video.HiveVideoSource
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -29,14 +35,19 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material.icons.Icons
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
@@ -53,6 +64,11 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
@@ -62,6 +78,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -69,6 +86,7 @@ import androidx.core.content.FileProvider
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import io.legado.app.ui.theme.LocalIsDark
 import androidx.webkit.WebViewAssetLoader
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -82,6 +100,7 @@ import java.util.zip.ZipFile
 /** 内置预览：云盘文件与邮件附件统一走这个入口。 */
 data class PreviewRequest(
     val title: String,
+    val expectedSize: Long = -1,
     val fileName: String,
     val load: suspend () -> File,
     /** 返回可展示的提示文案；null 表示该来源不提供下载。 */
@@ -139,7 +158,8 @@ private fun FilePreviewScreen(request: PreviewRequest) {
         if (fullscreen) fullscreen = false else PreviewHost.close()
     }
 
-    LaunchedEffect(request) {
+    var reloadTick by remember(request) { mutableIntStateOf(0) }
+    LaunchedEffect(request, reloadTick) {
         loading = true
         error = null
         runCatching { request.load() }
@@ -149,6 +169,7 @@ private fun FilePreviewScreen(request: PreviewRequest) {
     }
 
     val activity = context.findActivity()
+    val isDarkTheme = LocalIsDark.current
     DisposableEffect(fullscreen) {
         val window = activity?.window
         val controller = window?.let { WindowCompat.getInsetsController(it, it.decorView) }
@@ -160,8 +181,206 @@ private fun FilePreviewScreen(request: PreviewRequest) {
             controller?.show(WindowInsetsCompat.Type.systemBars())
         }
         onDispose {
+            controller?.isAppearanceLightStatusBars = !isDarkTheme
+            controller?.isAppearanceLightNavigationBars = !isDarkTheme
             if (fullscreen) controller?.show(WindowInsetsCompat.Type.systemBars())
         }
+    }
+
+    val loadedFile = file
+    if (kind == PreviewKind.VIDEO) {
+        var videoError by remember(loadedFile) { mutableStateOf<String?>(null) }
+        var videoRetry by remember(loadedFile) { mutableIntStateOf(0) }
+        var controlsVisible by remember { mutableStateOf(true) }
+        var playing by remember { mutableStateOf(false) }
+        var videoAspect by remember { mutableStateOf(0f) }
+        var engine by remember(loadedFile) { mutableIntStateOf(0) } // 0=Exo 1=MediaPlayer
+        var interactionTick by remember { mutableIntStateOf(0) }
+        val hasFile = loadedFile != null
+
+        // 沉浸式：activity 窗口 hide（课堂播放器同款，真机验证有效）。
+        // 不用 Dialog 承载——部分系统（vivo）在 Dialog 获焦时会强制恢复状态栏。
+        DisposableEffect(Unit) {
+            val activity = context.findActivity()
+            val controller = activity?.window?.let {
+                WindowCompat.getInsetsController(it, it.decorView)
+            }
+            controller?.systemBarsBehavior =
+                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            controller?.hide(WindowInsetsCompat.Type.systemBars())
+            onDispose {
+                controller?.show(WindowInsetsCompat.Type.systemBars())
+                activity?.requestedOrientation =
+                    android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+            }
+        }
+
+        // 顶栏与控制条一起自动隐藏（播放中 3 秒）
+        LaunchedEffect(controlsVisible, interactionTick, playing) {
+            if (controlsVisible && playing) {
+                delay(3000)
+                controlsVisible = false
+            }
+        }
+
+        // 按视频宽高比决定横竖屏：横屏视频转横屏，竖屏视频保持竖屏
+        DisposableEffect(videoAspect > 1f) {
+            val activity = context.findActivity()
+            activity?.requestedOrientation = if (videoAspect > 1f) {
+                android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            } else {
+                android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+            }
+            onDispose {
+                activity?.requestedOrientation =
+                    android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+            }
+        }
+
+        Box(Modifier.fillMaxSize().background(Color.Black)) {
+                when {
+                    // 加载过渡：黑底转圈
+                    loadedFile == null && loading -> Box(
+                        Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        CircularProgressIndicator(color = Color.White)
+                    }
+                    // 加载失败：错误 + 重试 + 关闭
+                    loadedFile == null -> Column(
+                        Modifier
+                            .fillMaxSize()
+                            .padding(32.dp),
+                        verticalArrangement = Arrangement.Center,
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Text(error ?: "", color = Color.White, textAlign = TextAlign.Center)
+                        Spacer(Modifier.height(16.dp))
+                        Button(onClick = { reloadTick++ }) { Text("重试") }
+                    }
+                    // 播放：双引擎
+                    videoError == null && engine == 0 -> HiveVideoPlayer(
+                        source = HiveVideoSource.Local(loadedFile),
+                        modifier = Modifier.fillMaxSize(),
+                        showControls = true,
+                        restartKey = videoRetry,
+                        controlsVisibleOverride = controlsVisible,
+                        onControlsToggle = {
+                            interactionTick++
+                            controlsVisible = !controlsVisible
+                        },
+                        onPlayingChange = { playing = it },
+                        onReady = { width, height, _ ->
+                            if (width > 0 && height > 0) videoAspect = width.toFloat() / height.toFloat()
+                        },
+                        onError = { engine = 1 },
+                    )
+                    videoError == null -> MediaPlayerVideo(
+                        file = loadedFile,
+                        modifier = Modifier.fillMaxSize(),
+                        showControls = true,
+                        controlsVisibleOverride = controlsVisible,
+                        onControlsToggle = {
+                            interactionTick++
+                            controlsVisible = !controlsVisible
+                        },
+                        onPlayingChange = { playing = it },
+                        onReady = { width, height, _ ->
+                            if (width > 0 && height > 0) videoAspect = width.toFloat() / height.toFloat()
+                        },
+                        onError = { videoError = it },
+                    )
+                    // 双引擎都失败
+                    else -> Column(
+                        Modifier
+                            .fillMaxSize()
+                            .padding(32.dp),
+                        verticalArrangement = Arrangement.Center,
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Text(videoError ?: "", color = Color.White, textAlign = TextAlign.Center)
+                        Spacer(Modifier.height(16.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Button(onClick = {
+                                videoError = null
+                                videoRetry++
+                                engine = 0
+                            }) { Text("重试") }
+                            OutlinedButton(onClick = {
+                                runCatching {
+                                    val uri = androidx.core.content.FileProvider.getUriForFile(
+                                        context,
+                                        context.packageName + ".files",
+                                        loadedFile,
+                                    )
+                                    context.startActivity(
+                                        Intent(Intent.ACTION_VIEW)
+                                            .setDataAndType(uri, "video/*")
+                                            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                                    )
+                                }.onFailure {
+                                    toast(context, it.message ?: "无法调用系统播放器")
+                                }
+                            }) { Text("用系统播放器打开", color = Color.White) }
+                        }
+                    }
+                }
+                // 顶部浮层：加载期常显；播放期与控制条同步显隐
+                AnimatedVisibility(
+                    visible = !hasFile || controlsVisible,
+                    enter = fadeIn(),
+                    exit = fadeOut(),
+                    modifier = Modifier.align(Alignment.TopCenter),
+                ) {
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .background(
+                                Brush.verticalGradient(
+                                    listOf(Color.Black.copy(alpha = 0.7f), Color.Transparent),
+                                ),
+                            )
+                            .statusBarsPadding()
+                            .padding(horizontal = 4.dp, vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        IconButton(onClick = { PreviewHost.close() }) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "关闭",
+                                tint = Color.White,
+                            )
+                        }
+                        Text(
+                            request.title,
+                            color = Color.White,
+                            style = MaterialTheme.typography.bodySmall,
+                            maxLines = 1,
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(end = 4.dp),
+                        )
+                        if (request.download != null) {
+                            TextButton(
+                                enabled = !downloading,
+                                onClick = {
+                                    downloading = true
+                                    scope.launch {
+                                        runCatching { request.download?.invoke() }
+                                            .onSuccess { message ->
+                                                if (!message.isNullOrBlank()) toast(context, message)
+                                            }
+                                            .onFailure { toast(context, it.message ?: "下载失败") }
+                                        downloading = false
+                                    }
+                                },
+                            ) { Text(if (downloading) "下载中…" else "下载", color = Color.White) }
+                        }
+                    }
+                }
+            }
+        return
     }
 
     Box(
@@ -215,12 +434,18 @@ private fun FilePreviewScreen(request: PreviewRequest) {
                     loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         CircularProgressIndicator()
                     }
-                    error != null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    error != null -> Column(
+                        Modifier.fillMaxSize().padding(24.dp),
+        verticalArrangement = Arrangement.Center,
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
                         Text(
                             error ?: "",
-                            modifier = Modifier.padding(24.dp),
                             color = MaterialTheme.colorScheme.error,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                         )
+                        Spacer(Modifier.height(14.dp))
+                        Button(onClick = { reloadTick++ }) { Text("重试") }
                     }
                     file != null -> when (kind) {
                         PreviewKind.PDF -> PdfPreview(file!!)
@@ -342,7 +567,7 @@ private fun PdfPreview(file: File) {
     var error by remember(file) { mutableStateOf<String?>(null) }
     val density = LocalDensity.current
 
-    BoxWithConstraints(Modifier.fillMaxSize().background(Color(0xFF111317))) {
+    BoxWithConstraints(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         val targetWidth = with(density) { minOf(maxWidth.toPx(), 1440f) }.toInt()
         LaunchedEffect(file, targetWidth) {
             if (targetWidth <= 0) return@LaunchedEffect
@@ -443,7 +668,9 @@ private fun PptxSlidesPreview(file: File) {
                             if (!preparing) {
                                 preparing = true
                                 scope.launch {
-                                    val video = withContext(Dispatchers.IO) { document.videoFile(part) }
+                                    val video = downloadWithRetry {
+                                        runCatching { document.videoFile(part) }.getOrNull()
+                                    }
                                     if (video != null) playing = video
                                     preparing = false
                                 }
@@ -624,24 +851,41 @@ private fun formatClock(ms: Int): String {
 }
 
 @Composable
-private fun VideoPreview(file: File) {
-    AndroidView(
-        factory = { context ->
-            VideoView(context).apply {
-                val controller = android.widget.MediaController(context)
-                controller.setAnchorView(this)
-                setMediaController(controller)
-                setVideoPath(file.absolutePath)
-                setOnPreparedListener {
-                    it.isLooping = false
-                    it.start()
-                    controller.show(0)
-                }
-            }
-        },
-        onRelease = { view -> view.stopPlayback() },
-        modifier = Modifier.fillMaxSize(),
-    )
+private fun VideoPreview(file: File, restartKey: Any? = null, onError: (String) -> Unit = {}) {
+    // 双引擎：ExoPlayer 先行（网络流/标准 MP4），解析不兼容时无感降级到
+    // MediaPlayer（系统解析器更宽容），降级也失败才把错误浮出来。
+    var engine by remember(file) { mutableStateOf(0) } // 0=ExoPlayer 1=MediaPlayer
+    var exoFailed by remember(file, restartKey) { mutableStateOf(false) }
+    if (engine == 0 && !exoFailed) {
+        HiveVideoPlayer(
+            source = HiveVideoSource.Local(file),
+            modifier = Modifier.fillMaxSize(),
+            showControls = true,
+            restartKey = restartKey,
+            onError = {
+                exoFailed = true
+            },
+        )
+    } else {
+        MediaPlayerVideo(
+            file = file,
+            modifier = Modifier.fillMaxSize(),
+            showControls = true,
+            onError = onError,
+        )
+    }
+}
+
+/** 带一次重试的下载：网络切换或媒体服务抖动时偶发 connection abort。 */
+private suspend fun downloadWithRetry(attempt: () -> java.io.File?): java.io.File? {
+    var result: java.io.File? = null
+    repeat(2) { round ->
+        if (result == null) {
+            runCatching { attempt() }.onSuccess { if (it != null) result = it }
+            if (result == null && round == 0) kotlinx.coroutines.delay(800)
+        }
+    }
+    return result
 }
 
 private object LegacyFileStore {

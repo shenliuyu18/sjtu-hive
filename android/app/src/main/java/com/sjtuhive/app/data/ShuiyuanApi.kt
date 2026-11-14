@@ -29,6 +29,8 @@ data class ShuiyuanTopicDetail(
     val id: Long,
     val title: String,
     val posts: List<ShuiyuanPost>,
+    // Discourse 返回的完整楼层 id 序列，首屏只带前 20 层，其余按需拉取。
+    val stream: List<Long> = emptyList(),
 )
 
 data class ShuiyuanProfile(
@@ -66,11 +68,7 @@ class ShuiyuanApi(private val context: Context) {
     }
 
     suspend fun topics(page: Int = 0): ShuiyuanPage = withContext(Dispatchers.IO) {
-        val body = HiveHttp.get(
-            context,
-            "$ORIGIN/latest.json?page=$page",
-            "$ORIGIN/latest",
-        )
+        val body = getJson("$ORIGIN/latest.json?page=$page", "$ORIGIN/latest")
         val root = JSONObject(body)
         val topicList = root.optJSONObject("topic_list") ?: return@withContext ShuiyuanPage(emptyList(), false)
         val list = topicList.optJSONArray("topics")
@@ -84,25 +82,61 @@ class ShuiyuanApi(private val context: Context) {
     }
 
     suspend fun topic(id: Long): ShuiyuanTopicDetail = withContext(Dispatchers.IO) {
-        val body = HiveHttp.get(context, "$ORIGIN/t/$id.json", "$ORIGIN/t/$id")
+        val body = getJson("$ORIGIN/t/$id.json", "$ORIGIN/t/$id")
         val root = JSONObject(body)
         val title = root.text("title")
-        val stream = root.optJSONObject("post_stream")
+        val postStream = root.optJSONObject("post_stream")
         val posts = mutableListOf<ShuiyuanPost>()
-        stream?.optJSONArray("posts")?.let { array ->
+        postStream?.optJSONArray("posts")?.let { array ->
             for (index in 0 until array.length()) {
-                val item = array.optJSONObject(index) ?: continue
-                posts += ShuiyuanPost(
-                    id = item.optLong("id"),
-                    username = item.text("username"),
-                    cooked = item.text("cooked"),
-                    createdAt = item.text("created_at"),
-                    postNumber = item.optInt("post_number"),
-                )
+                array.optJSONObject(index)?.let { item -> posts += mapPost(item) }
             }
         }
-        ShuiyuanTopicDetail(id, title, posts)
+        val stream = mutableListOf<Long>()
+        postStream?.optJSONArray("stream")?.let { array ->
+            for (index in 0 until array.length()) {
+                stream += array.optLong(index)
+            }
+        }
+        ShuiyuanTopicDetail(id, title, posts, stream.ifEmpty { posts.map { it.id } })
     }
+
+
+    /** 带静默重登的读取：401/403 先走一次 jAccount SSO，成功后重试原请求。 */
+    private suspend fun getJson(url: String, referer: String, acceptJson: Boolean = true): String =
+        withContext(Dispatchers.IO) {
+            try {
+                HiveHttp.get(context, url, referer, acceptJson)
+            } catch (cause: IllegalStateException) {
+                if (cause.message?.contains("登录已失效") == true && ensureLogin()) {
+                    HiveHttp.get(context, url, referer, acceptJson)
+                } else {
+                    throw cause
+                }
+            }
+        }
+
+    /** 按 id 批量补齐剩余楼层（Discourse 的 posts.json 支持 post_ids[]）。 */
+    suspend fun posts(topicId: Long, ids: List<Long>): List<ShuiyuanPost> = withContext(Dispatchers.IO) {
+        if (ids.isEmpty()) return@withContext emptyList()
+        val query = ids.joinToString("&") { "post_ids[]=$it" }
+        val body = getJson("$ORIGIN/t/$topicId/posts.json?$query", "$ORIGIN/t/$topicId")
+        val array = JSONObject(body).optJSONObject("post_stream")?.optJSONArray("posts")
+            ?: return@withContext emptyList()
+        val result = mutableListOf<ShuiyuanPost>()
+        for (index in 0 until array.length()) {
+            array.optJSONObject(index)?.let { item -> result += mapPost(item) }
+        }
+        result
+    }
+
+    private fun mapPost(item: JSONObject) = ShuiyuanPost(
+        id = item.optLong("id"),
+        username = item.text("username"),
+        cooked = item.text("cooked"),
+        createdAt = item.text("created_at"),
+        postNumber = item.optInt("post_number"),
+    )
 
     suspend fun reply(topicId: Long, raw: String): Unit = withContext(Dispatchers.IO) {
         if (raw.isBlank()) error("回复内容不能为空")
@@ -128,7 +162,7 @@ class ShuiyuanApi(private val context: Context) {
     }
 
     suspend fun categories(): List<ShuiyuanCategory> = withContext(Dispatchers.IO) {
-        val root = JSONObject(HiveHttp.get(context, "$ORIGIN/categories.json", "$ORIGIN/categories"))
+        val root = JSONObject(getJson("$ORIGIN/categories.json", "$ORIGIN/categories"))
         val list = root.optJSONObject("category_list")?.optJSONArray("categories")
             ?: return@withContext emptyList()
         val result = mutableListOf<ShuiyuanCategory>()
@@ -172,7 +206,7 @@ class ShuiyuanApi(private val context: Context) {
 
     private suspend fun csrfToken(): String {
         val csrf = runCatching {
-            JSONObject(HiveHttp.get(context, "$ORIGIN/session/csrf.json", "$ORIGIN/")).text("csrf")
+            JSONObject(getJson("$ORIGIN/session/csrf.json", "$ORIGIN/")).text("csrf")
         }.getOrNull().orEmpty()
         if (csrf.isEmpty()) throw CampusAuthException("水源社区登录已失效，请重新登录")
         return csrf
@@ -180,7 +214,7 @@ class ShuiyuanApi(private val context: Context) {
 
     suspend fun currentUsername(): String? = withContext(Dispatchers.IO) {
         runCatching {
-            JSONObject(HiveHttp.get(context, "$ORIGIN/session/current.json", "$ORIGIN/"))
+            JSONObject(getJson("$ORIGIN/session/current.json", "$ORIGIN/"))
                 .optJSONObject("current_user")?.text("username")
         }.getOrNull()?.takeIf { it.isNotBlank() }
     }
@@ -188,11 +222,11 @@ class ShuiyuanApi(private val context: Context) {
     suspend fun profile(username: String): ShuiyuanProfile = withContext(Dispatchers.IO) {
         val name = enc(username)
         val user = JSONObject(
-            HiveHttp.get(context, "$ORIGIN/u/$name.json", "$ORIGIN/u/$name"),
+            getJson("$ORIGIN/u/$name.json", "$ORIGIN/u/$name"),
         ).optJSONObject("user") ?: error("没有找到该用户")
         val summary = runCatching {
             JSONObject(
-                HiveHttp.get(context, "$ORIGIN/u/$name/summary.json", "$ORIGIN/u/$name"),
+                getJson("$ORIGIN/u/$name/summary.json", "$ORIGIN/u/$name"),
             ).optJSONObject("user_summary")
         }.getOrNull()
         ShuiyuanProfile(
@@ -209,11 +243,7 @@ class ShuiyuanApi(private val context: Context) {
     suspend fun createdTopics(username: String): List<ShuiyuanTopic> = withContext(Dispatchers.IO) {
         val name = enc(username)
         val root = JSONObject(
-            HiveHttp.get(
-                context,
-                "$ORIGIN/topics/created-by/$name.json?page=0",
-                "$ORIGIN/u/$name",
-            ),
+            getJson("$ORIGIN/topics/created-by/$name.json?page=0", "$ORIGIN/u/$name"),
         )
         val list = root.optJSONObject("topic_list")?.optJSONArray("topics")
             ?: return@withContext emptyList()

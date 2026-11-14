@@ -287,6 +287,7 @@ object HiveHttp {
         url: String,
         target: java.io.File,
         onProgress: (Long, Long) -> Unit = { _, _ -> },
+        expectedSize: Long = -1,
     ): java.io.File = withContext(Dispatchers.IO) {
         val request = Request.Builder()
             .url(url)
@@ -307,6 +308,14 @@ object HiveHttp {
                         output.write(buffer, 0, read)
                         written += read
                         onProgress(written, total)
+                    }
+                    // 服务器提前断流时 read 会正常返回 -1，必须校验长度，
+                    // 否则残缺的 MP4（moov 在尾部）会被当成下载成功，播放时报 Source error。
+                    // chunked 传输没有 contentLength，用云盘列表给出的文件大小兜底。
+                    val expect = if (total > 0) total else expectedSize
+                    if (expect > 0 && written != expect) {
+                        target.delete()
+                        error("下载不完整（${written / 1024 / 1024}MB / ${expect / 1024 / 1024}MB），请重试")
                     }
                 }
             }

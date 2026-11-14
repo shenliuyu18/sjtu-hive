@@ -1,6 +1,7 @@
 package com.sjtuhive.app.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -9,9 +10,11 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -29,7 +32,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Button
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.CompositionLocalProvider
@@ -43,7 +45,10 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
+import androidx.core.view.WindowCompat
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -59,12 +64,16 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import android.Manifest
 import android.content.pm.PackageManager
+import android.app.Activity
+import android.content.res.Configuration
 import android.os.Build
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.sjtuhive.app.data.CampusSession
+import com.sjtuhive.app.data.HiveCacheManager
 import com.sjtuhive.app.data.HiveNotifications
 import com.sjtuhive.app.data.HiveSession
+import com.sjtuhive.app.data.HiveThemePrefs
 import com.sjtuhive.app.data.HiveTestFeatures
 import com.sjtuhive.app.data.UpdateApi
 import com.kyant.backdrop.backdrops.layerBackdrop
@@ -72,24 +81,17 @@ import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import io.legado.app.domain.model.settings.AppUiConfiguration
+import io.legado.app.domain.model.settings.ThemeSettingsSnapshot
 import io.legado.app.ui.theme.LocalAppUiConfiguration
+import com.sjtuhive.app.ui.theme.HiveAccent
+import com.sjtuhive.app.ui.theme.HiveNeutrals
+import com.sjtuhive.app.ui.theme.hiveDarkScheme
+import com.sjtuhive.app.ui.theme.hiveLightScheme
 import io.legado.app.ui.theme.LocalIsDark
 import io.legado.app.ui.widget.components.FloatingBottomBar
 import io.legado.app.ui.widget.components.FloatingBottomBarItem
 
 /** legado-with-MD3 暗色配色；纯色背景，不使用壁纸。 */
-private val HiveColors = darkColorScheme(
-    primary = Color(0xFF9DC2FF),
-    onPrimary = Color(0xFF0B2B52),
-    secondary = Color(0xFFB9C7DA),
-    background = Color(0xFF0F1115),
-    onBackground = Color(0xFFE6E8EC),
-    surface = Color(0xFF15181E),
-    onSurface = Color(0xFFE6E8EC),
-    surfaceVariant = Color(0xFF1D2129),
-    onSurfaceVariant = Color(0xFFA8B0BC),
-)
-
 private enum class HiveTabId { Overview, Schedule, Services, CloudPan, Settings }
 
 private data class HiveTab(val id: HiveTabId, val label: String, val icon: ImageVector)
@@ -104,13 +106,109 @@ private val allTabs = listOf(
 
 @Composable
 fun HiveApp() {
+    val context = LocalContext.current
+    val configuration = LocalConfiguration.current
+    var themeMode by remember { mutableStateOf(HiveThemePrefs.themeMode(context)) }
+    var accentId by remember { mutableStateOf(HiveThemePrefs.accentId(context)) }
+    var customHue by remember { mutableStateOf(HiveThemePrefs.customHue(context)) }
+    var customSat by remember { mutableStateOf(HiveThemePrefs.customSat(context)) }
+    var customVal by remember { mutableStateOf(HiveThemePrefs.customVal(context)) }
+    var bottomBarDocked by remember { mutableStateOf(HiveThemePrefs.bottomBarDocked(context)) }
+    var blurRadius by remember { mutableStateOf(HiveThemePrefs.blurRadius(context)) }
+    var blurAlpha by remember { mutableStateOf(HiveThemePrefs.blurAlpha(context)) }
+
+    val isDark = when (themeMode) {
+        HiveThemePrefs.MODE_LIGHT -> false
+        HiveThemePrefs.MODE_SYSTEM -> (configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
+            Configuration.UI_MODE_NIGHT_YES
+        else -> true
+    }
+    val accent = if (accentId == HiveAccent.CUSTOM_ID) {
+        HiveAccent.derive(HiveAccent.hsvToColor(customHue, customSat, customVal))
+    } else {
+        HiveAccent.preset(accentId)
+    }
+    val neutrals = HiveNeutrals.of(accent.tintHue, accent.tintChroma)
+    val colors = if (isDark) hiveDarkScheme(accent, neutrals.second) else hiveLightScheme(accent, neutrals.first)
+
+    // 系统栏图标深浅跟随主题（浅色主题用深色图标）。
+    val view = LocalView.current
+    LaunchedEffect(isDark) {
+        val window = (view.context as? Activity)?.window ?: return@LaunchedEffect
+        val controller = WindowCompat.getInsetsController(window, view)
+        controller.isAppearanceLightStatusBars = !isDark
+        controller.isAppearanceLightNavigationBars = !isDark
+    }
+
     CompositionLocalProvider(
-        LocalIsDark provides true,
-        LocalAppUiConfiguration provides AppUiConfiguration(),
+        LocalIsDark provides isDark,
+        LocalAppUiConfiguration provides AppUiConfiguration(
+            ThemeSettingsSnapshot(
+                bottomBarBlurRadius = blurRadius,
+                bottomBarBlurAlpha = blurAlpha,
+                bottomBarLensRadius = 36f,
+            ),
+        ),
     ) {
-        MaterialTheme(colorScheme = HiveColors) {
+        MaterialTheme(colorScheme = colors) {
             Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize()) {
-                HiveShell()
+                HiveShell(
+                    themeMode = themeMode,
+                    accentId = accentId,
+                    customHue = customHue,
+                    customSat = customSat,
+                    customVal = customVal,
+                    bottomBarDocked = bottomBarDocked,
+                    onThemeModeChange = { mode ->
+                        HiveThemePrefs.setThemeMode(context, mode)
+                        themeMode = mode
+                    },
+                    onAccentChange = { id ->
+                        HiveThemePrefs.setAccentId(context, id)
+                        accentId = id
+                    },
+                    onCustomHueChange = { hue ->
+                        HiveThemePrefs.setCustomHue(context, hue)
+                        HiveThemePrefs.setAccentId(context, HiveAccent.CUSTOM_ID)
+                        customHue = hue
+                        accentId = HiveAccent.CUSTOM_ID
+                    },
+                    onCustomSvChange = { sat, value ->
+                        HiveThemePrefs.setCustomSv(context, sat, value)
+                        HiveThemePrefs.setAccentId(context, HiveAccent.CUSTOM_ID)
+                        customSat = sat
+                        customVal = value
+                        accentId = HiveAccent.CUSTOM_ID
+                    },
+                    onCustomHexChange = { hex ->
+                        runCatching {
+                            val color = android.graphics.Color.parseColor("#$hex")
+                            val hsv = FloatArray(3)
+                            android.graphics.Color.colorToHSV(color, hsv)
+                            HiveThemePrefs.setCustomHue(context, hsv[0].toDouble())
+                            HiveThemePrefs.setCustomSv(context, hsv[1], hsv[2])
+                            HiveThemePrefs.setAccentId(context, HiveAccent.CUSTOM_ID)
+                            customHue = hsv[0].toDouble()
+                            customSat = hsv[1]
+                            customVal = hsv[2]
+                            accentId = HiveAccent.CUSTOM_ID
+                        }
+                    },
+                    onBottomBarDockedChange = { docked ->
+                        HiveThemePrefs.setBottomBarDocked(context, docked)
+                        bottomBarDocked = docked
+                    },
+                    blurRadius = blurRadius,
+                    blurAlpha = blurAlpha,
+                    onBlurRadiusChange = { value ->
+                        HiveThemePrefs.setBlurRadius(context, value)
+                        blurRadius = value
+                    },
+                    onBlurAlphaChange = { value ->
+                        HiveThemePrefs.setBlurAlpha(context, value)
+                        blurAlpha = value
+                    },
+                )
             }
         }
     }
@@ -130,15 +228,84 @@ private val TeachingLogin = LoginTarget(
     autoClickSelector = "#authJwglxtLoginURL",
 )
 
+/** 停靠式底栏：贴底、不透明，替代悬浮玻璃胶囊（设置里可切换）。 */
 @Composable
-private fun HiveShell() {
+private fun HiveDockedBar(
+    tabs: List<HiveTab>,
+    selectedId: HiveTabId,
+    onSelect: (HiveTabId) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        modifier = modifier.fillMaxWidth(),
+    ) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .height(64.dp),
+        ) {
+            tabs.forEach { tab ->
+                val isSelected = tab.id == selectedId
+                Column(
+                    Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .clickable { onSelect(tab.id) },
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                ) {
+                    Icon(
+                        imageVector = tab.icon,
+                        contentDescription = tab.label,
+                        tint = if (isSelected) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                        modifier = Modifier.size(22.dp),
+                    )
+                    Text(
+                        tab.label,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (isSelected) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HiveShell(
+    themeMode: String,
+    accentId: String,
+    customHue: Double,
+    customSat: Float,
+    customVal: Float,
+    bottomBarDocked: Boolean,
+    onThemeModeChange: (String) -> Unit,
+    onAccentChange: (String) -> Unit,
+    onCustomHueChange: (Double) -> Unit,
+    onCustomSvChange: (Float, Float) -> Unit,
+    onCustomHexChange: (String) -> Unit,
+    onBottomBarDockedChange: (Boolean) -> Unit,
+    blurRadius: Int,
+    blurAlpha: Int,
+    onBlurRadiusChange: (Int) -> Unit,
+    onBlurAlphaChange: (Int) -> Unit,
+) {
     var selectedId by remember { mutableStateOf(HiveTabId.Overview) }
     val context = LocalContext.current
     var servicesEnabled by remember { mutableStateOf(HiveTestFeatures.servicesEnabled(context)) }
     val tabs = remember(servicesEnabled) {
         allTabs.filter { it.id != HiveTabId.Services || servicesEnabled }
     }
-    val selected = tabs.indexOfFirst { it.id == selectedId }.coerceAtLeast(0)
     var loggedIn by remember { mutableStateOf(HiveSession.isLoggedIn(context)) }
 
     // WebView 体系初始化完成前读不到 WebView 的 Cookie；回到前台时再用它校准登录态，
@@ -205,6 +372,9 @@ private fun HiveShell() {
     var showMessages by remember { mutableStateOf(false) }
     var servicesFullscreen by remember { mutableStateOf(false) }
     LaunchedEffect(tabs) {
+        // 开关「办事」会改变页签数量：重置可能残留的全屏标志，
+        // 并在当前页签被移除时立即切走，避免以禁用状态渲染办事页一帧。
+        servicesFullscreen = false
         if (tabs.none { it.id == selectedId }) selectedId = tabs.first().id
     }
     val tabStates = rememberSaveableStateHolder()
@@ -212,11 +382,15 @@ private fun HiveShell() {
     LaunchedEffect(sessionVersion) {
         if (sessionVersion > 0) HiveUiCache.clear()
     }
-    // 玻璃底栏采样的是内容层的画面：这里把纯色背景画进 backdrop，
-    // 底栏因此能对下方内容做真实模糊（kyant backdrop + 液态玻璃）。
-    val background = MaterialTheme.colorScheme.background
-    val backdrop = rememberLayerBackdrop {
-        drawRect(background)
+    // 玻璃底栏采样的是内容层的画面。
+    // 注意不要给 rememberLayerBackdrop 传自定义 onDraw：那会替换掉默认的
+    // drawContent()，等于把捕获到的内容擦掉，玻璃里只剩一块纯色。
+    val backdrop = rememberLayerBackdrop()
+    // 自动清除缓存：按用户在设置里选择的类别与时机，启动时静默执行一次
+    LaunchedEffect(Unit) {
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching { HiveCacheManager.maybeAutoClear(context) }
+        }
     }
     // 隐藏的会话续期窗口：站点会话过期时静默走一次 SSO，用户不必手动重新登录。
     val sessionView = remember {
@@ -277,12 +451,18 @@ private fun HiveShell() {
                         onLogin = { loginTarget = CalendarLogin },
                         onLoginTeachingSite = { loginTarget = TeachingLogin },
                     )
-                    HiveTabId.Services -> ServicesScreen(
-                        context = context,
-                        loggedIn = loggedIn,
-                        onLogin = { loginTarget = MySjtuLogin },
-                        onFullscreenChange = { servicesFullscreen = it },
-                    )
+                    HiveTabId.Services -> if (servicesEnabled) {
+                        ServicesScreen(
+                            context = context,
+                            loggedIn = loggedIn,
+                            onLogin = { loginTarget = MySjtuLogin },
+                            onFullscreenChange = { servicesFullscreen = it },
+                        )
+                    } else {
+                        // 开关刚关掉的那一帧 selectedId 还没被 LaunchedEffect 改走，
+                        // 这里兜住，避免渲染一个处于禁用状态的办事页。
+                        Box(Modifier.fillMaxSize())
+                    }
                     HiveTabId.CloudPan -> CloudPanScreen(
                         context = context,
                         loggedIn = loggedIn,
@@ -293,6 +473,22 @@ private fun HiveShell() {
                         loggedIn = loggedIn,
                         onLogin = { loginTarget = CalendarLogin },
                         onLogout = { loggedIn = false },
+                        themeMode = themeMode,
+                        accentId = accentId,
+                        customHue = customHue,
+                        customSat = customSat,
+                        customVal = customVal,
+                        bottomBarDocked = bottomBarDocked,
+                        onThemeModeChange = onThemeModeChange,
+                        onAccentChange = onAccentChange,
+                        onCustomHueChange = onCustomHueChange,
+                        onCustomSvChange = onCustomSvChange,
+                        onCustomHexChange = onCustomHexChange,
+                        onBottomBarDockedChange = onBottomBarDockedChange,
+                        blurRadius = blurRadius,
+                        blurAlpha = blurAlpha,
+                        onBlurRadiusChange = onBlurRadiusChange,
+                        onBlurAlphaChange = onBlurAlphaChange,
                         servicesEnabled = servicesEnabled,
                         onServicesEnabledChange = { enabled ->
                             HiveTestFeatures.setServicesEnabled(context, enabled)
@@ -374,15 +570,27 @@ private fun HiveShell() {
         if (loginTarget == null && !showShuiyuan && !showCanvas && !showEmail && !showClassroom &&
             !showCourseCommunity && !showShare && !showMessages && !servicesFullscreen &&
             PreviewHost.request == null
-        ) FloatingBottomBar(
+        ) if (bottomBarDocked) {
+            HiveDockedBar(
+                tabs = tabs,
+                selectedId = selectedId,
+                onSelect = { selectedId = it },
+                modifier = Modifier.align(Alignment.BottomCenter),
+            )
+        } else key(tabs) { FloatingBottomBar(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp, vertical = 18.dp)
                 .height(64.dp),
-            selectedIndex = { selected },
+            // 必须读 selectedId（状态）而不是 selected（本次组合的快照值），
+            // 否则底栏内部的 snapshotFlow 观察不到切换，指示器不会跟随。
+            selectedIndex = { tabs.indexOfFirst { it.id == selectedId }.coerceAtLeast(0) },
             onSelected = { index -> tabs.getOrNull(index)?.let { selectedId = it.id } },
             backdrop = backdrop,
+            // kyant backdrop 的模糊/折射走 RenderEffect，Android 13 以下不可用，
+            // 关掉后组件自动退化为半透明纯色胶囊（见 docs/android12-compat.md）。
+            isBlurEnabled = Build.VERSION.SDK_INT >= 33,
             tabsCount = tabs.size,
         ) {
             tabs.forEach { tab ->
@@ -395,7 +603,7 @@ private fun HiveShell() {
                     Text(tab.label, style = MaterialTheme.typography.labelSmall)
                 }
             }
-        }
+        } }
         if (PreviewHost.request != null) {
             FilePreviewOverlay()
         }

@@ -42,6 +42,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.sjtuhive.app.data.CanvasAnnouncement
@@ -121,6 +122,10 @@ fun CanvasScreen(context: Context, onClose: () -> Unit) {
         val current = course
         runCatching {
             if (current == null) {
+                // 冷启动先用磁盘快照，再刷新覆盖
+                if (courses.isEmpty()) {
+                    runCatching { courses = api.coursesCached() }
+                }
                 courses = api.courses()
                 files = emptyList()
                 assignments = emptyList()
@@ -131,7 +136,12 @@ fun CanvasScreen(context: Context, onClose: () -> Unit) {
                     "modules" -> modules = api.modules(current.id)
                     "assignments" -> assignments = api.assignments(current.id)
                     "announcements" -> announcements = api.announcements(current.id)
-                    else -> files = api.files(current.id)
+                    else -> {
+                        if (files.isEmpty()) {
+                            runCatching { files = api.filesCached(current.id) }
+                        }
+                        files = api.files(current.id)
+                    }
                 }
             }
         }.onFailure {
@@ -563,11 +573,12 @@ private fun CanvasReader(doc: CanvasDoc, onBack: () -> Unit) {
                 maxLines = 2,
             )
         }
+        val webViewBg = MaterialTheme.colorScheme.background.toArgb()
         AndroidView(
             modifier = Modifier.fillMaxSize(),
             factory = { viewContext ->
                 WebView(viewContext).apply {
-                    setBackgroundColor(0xFF0F1115.toInt())
+                    setBackgroundColor(webViewBg)
                     settings.javaScriptEnabled = true
                     settings.domStorageEnabled = true
                     loadDataWithBaseURL("https://oc.sjtu.edu.cn", html, "text/html", "UTF-8", null)

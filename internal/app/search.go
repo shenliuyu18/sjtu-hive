@@ -141,20 +141,29 @@ func (s *Search) Query(query string) (SearchResponse, error) {
 	}
 
 	timetable := []SearchItem{}
-	rows, err = s.db.Query(`SELECT id, course_name, teacher, classroom, semester FROM timetable_lessons
-		WHERE course_name LIKE ? ESCAPE '\' OR teacher LIKE ? ESCAPE '\' OR classroom LIKE ? ESCAPE '\'
-		ORDER BY semester DESC, course_name LIMIT 12`, like, like, like)
+	rows, err = s.db.Query(`SELECT id, title, start_at, location FROM school_events
+		WHERE calendar_name = '课程' AND (title LIKE ? ESCAPE '\' OR location LIKE ? ESCAPE '\')
+		ORDER BY start_at DESC LIMIT 12`, like, like)
 	if err == nil {
 		for rows.Next() {
-			var id int64
-			var name string
-			var teacher, classroom, semester sql.NullString
-			if rows.Scan(&id, &name, &teacher, &classroom, &semester) == nil {
+			var id string
+			var title, startAt string
+			var location sql.NullString
+			if rows.Scan(&id, &title, &startAt, &location) == nil {
+				subtitle := location.String
+				if at, parseErr := time.Parse(time.RFC3339, startAt); parseErr == nil {
+					stamp := at.Local().Format("01-02 15:04")
+					if subtitle == "" {
+						subtitle = stamp
+					} else {
+						subtitle += " · " + stamp
+					}
+				}
 				timetable = append(timetable, SearchItem{
-					ID:       "lesson-" + semester.String,
-					Title:    name,
-					Subtitle: strings.Join(nonEmpty(teacher.String, classroom.String, semester.String), " · "),
-					Route:    map[string]any{"view": "timetable"},
+					ID:       "course-" + id,
+					Title:    title,
+					Subtitle: subtitle,
+					Route:    map[string]any{"view": "timetable", "timetableDate": startAt},
 				})
 			}
 		}

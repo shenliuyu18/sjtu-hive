@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
@@ -51,6 +52,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -74,6 +76,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowCompat
@@ -88,13 +91,15 @@ import com.kyant.backdrop.effects.lens
 import com.kyant.backdrop.effects.vibrancy
 import com.kyant.backdrop.highlight.Highlight
 import com.kyant.backdrop.shadow.Shadow
-import com.kyant.capsule.ContinuousCapsule
 import com.sjtuhive.app.data.ClassroomApi
-import io.legado.app.ui.widget.components.GlassDefaults
 import kotlin.math.roundToInt
 import com.sjtuhive.app.data.CampusSession
 import com.sjtuhive.app.data.ClassroomStream
 import com.sjtuhive.app.data.ClassroomVideo
+import com.sjtuhive.app.ui.video.HiveVideoHandle
+import com.sjtuhive.app.ui.video.HiveVideoPlayer
+import com.sjtuhive.app.ui.video.HiveVideoSource
+import io.legado.app.ui.theme.LocalIsDark
 import com.sjtuhive.app.data.HiveSession
 import com.sjtuhive.app.data.TranscriptSegment
 import com.sjtuhive.app.data.VideoCourse
@@ -410,6 +415,8 @@ private fun VideoPlayerScreen(
     var transcriptError by remember { mutableStateOf<String?>(null) }
 
     val activity = context.findActivity()
+    // 退出播放器时系统栏图标要回到当前主题的深浅（全屏期间系统可能改写）。
+    val isDarkTheme = LocalIsDark.current
     DisposableEffect(Unit) {
         val window = activity?.window
         val controller = window?.let { WindowCompat.getInsetsController(it, it.decorView) }
@@ -418,6 +425,8 @@ private fun VideoPlayerScreen(
         controller?.hide(WindowInsetsCompat.Type.systemBars())
         activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
         onDispose {
+            controller?.isAppearanceLightStatusBars = !isDarkTheme
+            controller?.isAppearanceLightNavigationBars = !isDarkTheme
             controller?.show(WindowInsetsCompat.Type.systemBars())
             // 退出播放器后固定回竖屏：自动旋转关闭时 UNSPECIFIED 会一直停在横屏。
             activity?.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
@@ -457,7 +466,8 @@ private fun VideoPlayerScreen(
         .joinToString(" – ")
 
     fun touched() {
-        controlsVisible = true
+        // 只重置自动隐藏计时，不强制显示：点击画面的显隐由 onToggleControls 统一翻转，
+        // 这里再置 true 会和翻转互相抵消（表现就是隐藏后点不出来）。
         interactionTick++
     }
 
@@ -539,22 +549,23 @@ private fun VideoPlayerScreen(
                             ),
                         ),
                 )
-                GlassBar(
-                    backdrop = glassBackdrop,
-                    modifier = Modifier
+                Row(
+                    Modifier
                         .fillMaxWidth()
                         .windowInsetsPadding(WindowInsets.displayCutout)
-                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    GlassIconButton(
-                        backdrop = glassBackdrop,
-                        icon = Icons.AutoMirrored.Filled.ArrowBack,
-                        label = "返回",
-                        onClick = {
-                            touched()
-                            onBack()
-                        },
-                    )
+                    IconButton(onClick = {
+                        touched()
+                        onBack()
+                    }) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "返回",
+                            tint = Color.White,
+                        )
+                    }
                     Text(
                         title,
                         color = Color.White,
@@ -562,36 +573,24 @@ private fun VideoPlayerScreen(
                         maxLines = 1,
                         modifier = Modifier
                             .weight(1f)
-                            .padding(horizontal = 10.dp),
+                            .padding(horizontal = 6.dp),
                     )
                     if (streams.size > 1) {
-                        GlassPillButton(
-                            backdrop = glassBackdrop,
-                            label = if (dual) "单画面" else "双画面",
-                            onClick = {
-                                touched()
-                                dual = !dual
-                            },
-                        )
+                        TextButton(onClick = {
+                            touched()
+                            dual = !dual
+                        }) { Text(if (dual) "单画面" else "双画面", color = Color.White) }
                     }
                     if (!dual && streams.size > 1) {
-                        GlassPillButton(
-                            backdrop = glassBackdrop,
-                            label = "画面 ${streamIndex + 1}/${streams.size}",
-                            onClick = {
-                                touched()
-                                streamIndex = (streamIndex + 1) % streams.size
-                            },
-                        )
-                    }
-                    GlassPillButton(
-                        backdrop = glassBackdrop,
-                        label = "文稿",
-                        onClick = {
+                        TextButton(onClick = {
                             touched()
-                            showTranscript = true
-                        },
-                    )
+                            streamIndex = (streamIndex + 1) % streams.size
+                        }) { Text("画面 ${streamIndex + 1}/${streams.size}", color = Color.White) }
+                    }
+                    TextButton(onClick = {
+                        touched()
+                        showTranscript = true
+                    }) { Text("文稿", color = Color.White) }
                 }
             }
         }
@@ -609,7 +608,7 @@ private fun TranscriptPanel(
     Column(
         Modifier
             .fillMaxSize()
-            .background(Color(0xFF0F1115))
+            .background(MaterialTheme.colorScheme.background)
             .windowInsetsPadding(WindowInsets.displayCutout)
             .padding(WindowInsets.navigationBars.asPaddingValues()),
     ) {
@@ -619,26 +618,25 @@ private fun TranscriptPanel(
                 .padding(start = 8.dp, end = 16.dp, top = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            TextButton(onClick = onBack) { Text("← 返回", color = Color.White) }
+            TextButton(onClick = onBack) { Text("← 返回") }
             Text(
                 "语音文稿",
                 style = MaterialTheme.typography.titleMedium,
-                color = Color.White,
                 modifier = Modifier.weight(1f),
             )
         }
         when {
             loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(color = Color.White)
+                CircularProgressIndicator()
             }
             error != null -> Text(
                 error,
-                color = Color(0xFFE38B75),
+                color = MaterialTheme.colorScheme.error,
                 modifier = Modifier.padding(24.dp),
             )
             segments.isEmpty() -> Text(
                 "这节课暂无语音识别文稿。",
-                color = Color(0xFFB0B6C0),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(24.dp),
             )
             else -> LazyColumn(
@@ -654,7 +652,7 @@ private fun TranscriptPanel(
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         Text(
                             formatClock(segment.startMs),
-                            color = Color(0xFF9DC2FF),
+                            color = MaterialTheme.colorScheme.primary,
                             style = MaterialTheme.typography.labelSmall,
                         )
                         Text(
@@ -671,7 +669,7 @@ private fun TranscriptPanel(
 }
 
 private class PlayerSlot {
-    var player: MediaPlayer? = null
+    var player: HiveVideoHandle? = null
     var aspect by mutableStateOf(16f / 9f)
     var ready by mutableStateOf(false)
 }
@@ -698,6 +696,7 @@ private fun VideoStage(
     var position by remember { mutableLongStateOf(initialPosition) }
     var duration by remember { mutableLongStateOf(0L) }
     var error by remember { mutableStateOf<String?>(null) }
+    var retryTick by remember { mutableIntStateOf(0) }
 
     LaunchedEffect(dual) {
         if (!dual) {
@@ -711,7 +710,7 @@ private fun VideoStage(
         onDispose {
             runCatching {
                 primarySlot.player?.let {
-                    progressStore.saveProgress(videoId, it.currentPosition.toLong())
+                    progressStore.saveProgress(videoId, it.positionMs)
                 }
             }
         }
@@ -723,8 +722,8 @@ private fun VideoStage(
             val primary = primarySlot.player
             if (primary != null && primarySlot.ready) {
                 runCatching {
-                    position = primary.currentPosition.toLong()
-                    duration = primary.duration.toLong().coerceAtLeast(0L)
+                    position = primary.positionMs
+                    duration = primary.durationMs
                     playing = primary.isPlaying
                 }
                 onPlayingChanged(playing)
@@ -733,12 +732,12 @@ private fun VideoStage(
                     if (second != null && secondarySlot.ready) {
                         runCatching {
                             if (primary.isPlaying != second.isPlaying) {
-                                if (primary.isPlaying) second.start() else second.pause()
+                                if (primary.isPlaying) second.play() else second.pause()
                             }
                             if (primary.isPlaying &&
-                                kotlin.math.abs(primary.currentPosition - second.currentPosition) > 1500
+                                kotlin.math.abs(primary.positionMs - second.positionMs) > 1500
                             ) {
-                                second.seekTo(primary.currentPosition)
+                                second.seekTo(primary.positionMs)
                             }
                         }
                     }
@@ -749,25 +748,6 @@ private fun VideoStage(
             }
             delay(500)
         }
-    }
-
-    fun seekAll(target: Long) {
-        onInteraction()
-        runCatching {
-            primarySlot.player?.seekTo(target.toInt())
-            if (dual) secondarySlot.player?.seekTo(target.toInt())
-        }
-        position = target
-    }
-
-    fun setPlayback(play: Boolean) {
-        onInteraction()
-        runCatching {
-            primarySlot.player?.let { if (play) it.start() else it.pause() }
-            if (dual) secondarySlot.player?.let { if (play) it.start() else it.pause() }
-        }
-        playing = play
-        onPlayingChanged(play)
     }
 
     val onPrimaryCompleted = {
@@ -790,6 +770,10 @@ private fun VideoStage(
                     slot = primarySlot,
                     onError = { error = it },
                     onCompleted = onPrimaryCompleted,
+                    restartKey = retryTick,
+                    controlsVisibleOverride = controlsVisible,
+                    onControlsToggle = onToggleControls,
+                    onUserInteraction = onInteraction,
                 )
             }
             if (dual && secondaryUrl != null) {
@@ -801,87 +785,33 @@ private fun VideoStage(
                         startPosition = position,
                         slot = secondarySlot,
                         onError = { error = it },
+                        restartKey = retryTick,
                     )
                 }
             }
         }
-        Box(
-            Modifier
-                .fillMaxSize()
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                ) { onToggleControls() },
-        )
         if (error != null) {
-            Text(
-                error ?: "",
-                color = Color(0xFFE38B75),
+            Column(
                 modifier = Modifier.align(Alignment.Center),
-            )
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(
+                    error ?: "",
+                    color = Color(0xFFE38B75),
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(horizontal = 24.dp),
+                )
+                Spacer(Modifier.height(12.dp))
+                Button(onClick = {
+                    error = null
+                    retryTick++
+                }) { Text("重试") }
+            }
         } else if (!primarySlot.ready) {
             CircularProgressIndicator(
                 color = Color.White,
                 modifier = Modifier.align(Alignment.Center),
             )
-        }
-        AnimatedVisibility(
-            visible = controlsVisible,
-            modifier = Modifier.align(Alignment.BottomCenter),
-            enter = fadeIn(),
-            exit = fadeOut(),
-        ) {
-            Box(Modifier.fillMaxWidth()) {
-                Box(
-                    Modifier
-                        .fillMaxWidth()
-                        .height(160.dp)
-                        .background(
-                            Brush.verticalGradient(
-                                listOf(Color.Transparent, Color(0xCC000000)),
-                            ),
-                        ),
-                )
-                GlassBar(
-                    backdrop = backdrop,
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .fillMaxWidth()
-                        .windowInsetsPadding(
-                            WindowInsets.navigationBars.only(WindowInsetsSides.Bottom),
-                        )
-                        .padding(horizontal = 12.dp, vertical = 12.dp),
-                ) {
-                    GlassIconButton(
-                        backdrop = backdrop,
-                        icon = if (playing) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                        label = if (playing) "暂停" else "播放",
-                        onClick = { setPlayback(!playing) },
-                    )
-                    GlassSlider(
-                        fraction = if (duration > 0) {
-                            (position.toFloat() / duration).coerceIn(0f, 1f)
-                        } else {
-                            0f
-                        },
-                        onScrub = { fraction ->
-                            position = (fraction * duration).toLong()
-                        },
-                        onCommit = { fraction ->
-                            seekAll((fraction * duration).toLong())
-                        },
-                        backdrop = backdrop,
-                        modifier = Modifier
-                            .weight(1f)
-                            .padding(horizontal = 10.dp),
-                    )
-                    Text(
-                        "${formatClock(position)} / ${formatClock(duration)}",
-                        color = Color.White,
-                        style = MaterialTheme.typography.labelSmall,
-                    )
-                }
-            }
         }
     }
 }
@@ -895,266 +825,45 @@ private fun VideoPane(
     slot: PlayerSlot,
     onError: (String) -> Unit,
     onCompleted: (() -> Unit)? = null,
+    restartKey: Any? = null,
+    controlsVisibleOverride: Boolean? = null,
+    onControlsToggle: (() -> Unit)? = null,
+    onUserInteraction: (() -> Unit)? = null,
 ) {
+    // 旧的裸 MediaPlayer/TextureView 实现已统一到 HiveVideoPlayer：
+    // 文件预览与课堂视频共用同一套播放核心与控制体验。
     DisposableEffect(slot, url) {
+        slot.ready = false
         onDispose {
-            runCatching { slot.player?.release() }
-            slot.player = null
             slot.ready = false
+            slot.player = null
         }
     }
-    AndroidView(
+    HiveVideoPlayer(
+        source = HiveVideoSource.Remote(
+            url = url,
+            headers = mapOf("Referer" to VIDEO_HOME, "Origin" to VIDEO_ORIGIN),
+        ),
         modifier = Modifier.aspectRatio(slot.aspect, matchHeightConstraintsFirst = true),
-        factory = { viewContext ->
-            TextureView(viewContext).apply {
-                surfaceTextureListener = object : TextureView.SurfaceTextureListener {
-                    override fun onSurfaceTextureAvailable(
-                        surface: SurfaceTexture,
-                        width: Int,
-                        height: Int,
-                    ) {
-                        val media = slot.player ?: MediaPlayer().also { player ->
-                            slot.player = player
-                            runCatching {
-                                player.setDataSource(
-                                    viewContext,
-                                    Uri.parse(url),
-                                    mapOf(
-                                        "Referer" to VIDEO_HOME,
-                                        "Origin" to VIDEO_ORIGIN,
-                                        "Accept" to "*/*",
-                                    ),
-                                )
-                                player.setVolume(
-                                    if (muted) 0f else 1f,
-                                    if (muted) 0f else 1f,
-                                )
-                                player.setOnPreparedListener { prepared ->
-                                    slot.aspect = prepared.videoWidth.toFloat() /
-                                        prepared.videoHeight.coerceAtLeast(1).toFloat()
-                                    val resume = startPosition
-                                        .takeIf { it > 1000 && it < prepared.duration - 3000 }
-                                        ?: 0L
-                                    if (resume > 0) prepared.seekTo(resume.toInt())
-                                    prepared.start()
-                                    slot.ready = true
-                                }
-                                player.setOnErrorListener { _, what, extra ->
-                                    onError("播放失败（$what/$extra）")
-                                    true
-                                }
-                                if (onCompleted != null) {
-                                    player.setOnCompletionListener { onCompleted() }
-                                }
-                                player.prepareAsync()
-                            }.onFailure { onError(it.message ?: "无法播放") }
-                        }
-                        media.setSurface(Surface(surface))
-                    }
-
-                    override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean {
-                        slot.player?.setSurface(null)
-                        return true
-                    }
-
-                    override fun onSurfaceTextureSizeChanged(
-                        surface: SurfaceTexture,
-                        width: Int,
-                        height: Int,
-                    ) = Unit
-
-                    override fun onSurfaceTextureUpdated(surface: SurfaceTexture) = Unit
-                }
-            }
+        autoStart = true,
+        startPositionMs = startPosition,
+        muted = muted,
+        // 统一控制条：主画面带控制条；副画面（静音小窗）不带
+        showControls = !muted,
+        controlsVisibleOverride = if (muted) null else controlsVisibleOverride,
+        onControlsToggle = if (muted) null else onControlsToggle,
+        onUserInteraction = onUserInteraction,
+        restartKey = restartKey,
+        onReady = { width, height, _ ->
+            if (width > 0 && height > 0) slot.aspect = width.toFloat() / height.toFloat()
+            slot.ready = true
         },
+        onError = onError,
+        onCompleted = onCompleted,
+        // 父级的位置轮询与 seekAll 通过 PlayerSlot 访问播放器，这里桥接回去
+        onPlayerCreated = { media -> slot.player = media },
     )
 }
-
-@Composable
-private fun GlassSlider(
-    fraction: Float,
-    onScrub: (Float) -> Unit,
-    onCommit: (Float) -> Unit,
-    backdrop: Backdrop,
-    modifier: Modifier = Modifier,
-) {
-    var width by remember { mutableIntStateOf(0) }
-    val thumbSize = 18.dp
-    val thumbPx = with(LocalDensity.current) { thumbSize.toPx() }
-    val tint = GlassDefaults.glassColor(Color(0xFF0F1115), 0.3f)
-    Box(
-        modifier
-            .height(34.dp)
-            .clip(ContinuousCapsule)
-            .drawBackdrop(
-                backdrop = backdrop,
-                shape = { ContinuousCapsule },
-                effects = {
-                    vibrancy()
-                    blur(20.dp.toPx())
-                    lens(14.dp.toPx(), 14.dp.toPx())
-                },
-                highlight = { Highlight.Default.copy(alpha = 0.7f) },
-                shadow = { Shadow.Default.copy(color = Color.Black.copy(alpha = 0.25f)) },
-                onDrawSurface = { drawRect(tint) },
-            )
-            .onSizeChanged { width = it.width }
-            .pointerInput(Unit) {
-                awaitEachGesture {
-                    val down = awaitFirstDown()
-                    val trackWidth = width
-                    if (trackWidth <= 0) return@awaitEachGesture
-                    var last = (down.position.x / trackWidth).coerceIn(0f, 1f)
-                    onScrub(last)
-                    drag(down.id) { change ->
-                        last = (change.position.x / width).coerceIn(0f, 1f)
-                        onScrub(last)
-                        change.consume()
-                    }
-                    onCommit(last)
-                }
-            },
-        contentAlignment = Alignment.CenterStart,
-    ) {
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .height(8.dp)
-                .clip(ContinuousCapsule)
-                .background(Color.White.copy(alpha = 0.16f)),
-        )
-        Box(
-            Modifier
-                .fillMaxWidth(fraction.coerceIn(0f, 1f))
-                .height(8.dp)
-                .clip(ContinuousCapsule)
-                .background(Color.White.copy(alpha = 0.82f)),
-        )
-        Box(
-            Modifier
-                .offset {
-                    IntOffset(
-                        ((width - thumbPx) * fraction.coerceIn(0f, 1f)).roundToInt(),
-                        0,
-                    )
-                }
-                .size(thumbSize)
-                .clip(ContinuousCapsule)
-                .drawBackdrop(
-                    backdrop = backdrop,
-                    shape = { ContinuousCapsule },
-                    effects = {
-                        vibrancy()
-                        blur(12.dp.toPx())
-                        lens(8.dp.toPx(), 8.dp.toPx())
-                    },
-                    highlight = { Highlight.Default },
-                    shadow = { Shadow.Default.copy(color = Color.Black.copy(alpha = 0.3f)) },
-                    onDrawSurface = { drawRect(Color.White.copy(alpha = 0.4f)) },
-                ),
-        )
-    }
-}
-
-@Composable
-private fun GlassBar(
-    backdrop: Backdrop,
-    modifier: Modifier = Modifier,
-    content: @Composable RowScope.() -> Unit,
-) {
-    val tint = GlassDefaults.glassColor(Color(0xFF0F1115), 0.55f)
-    Row(
-        modifier
-            .clip(ContinuousCapsule)
-            .drawBackdrop(
-                backdrop = backdrop,
-                shape = { ContinuousCapsule },
-                effects = {
-                    vibrancy()
-                    blur(18.dp.toPx())
-                    lens(24.dp.toPx(), 24.dp.toPx())
-                },
-                highlight = { Highlight.Default.copy(alpha = 0.9f) },
-                shadow = { Shadow.Default.copy(color = Color.Black.copy(alpha = 0.35f)) },
-                onDrawSurface = { drawRect(tint) },
-            )
-            .padding(horizontal = 8.dp, vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        content = content,
-    )
-}
-
-@Composable
-private fun GlassIconButton(
-    backdrop: Backdrop,
-    icon: ImageVector,
-    label: String,
-    onClick: () -> Unit,
-) {
-    val tint = GlassDefaults.glassColor(Color(0xFF0F1115), 0.45f)
-    Box(
-        Modifier
-            .size(42.dp)
-            .clip(ContinuousCapsule)
-            .clickable(onClick = onClick)
-            .drawBackdrop(
-                backdrop = backdrop,
-                shape = { ContinuousCapsule },
-                effects = {
-                    vibrancy()
-                    blur(16.dp.toPx())
-                    lens(18.dp.toPx(), 18.dp.toPx())
-                },
-                highlight = { Highlight.Default.copy(alpha = 0.8f) },
-                shadow = { Shadow.Default.copy(color = Color.Black.copy(alpha = 0.3f)) },
-                onDrawSurface = { drawRect(tint) },
-            ),
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(
-            icon,
-            contentDescription = label,
-            tint = Color.White,
-            modifier = Modifier.size(20.dp),
-        )
-    }
-}
-
-@Composable
-private fun GlassPillButton(
-    backdrop: Backdrop,
-    label: String,
-    onClick: () -> Unit,
-) {
-    val tint = GlassDefaults.glassColor(Color(0xFF0F1115), 0.45f)
-    Box(
-        Modifier
-            .clip(ContinuousCapsule)
-            .clickable(onClick = onClick)
-            .drawBackdrop(
-                backdrop = backdrop,
-                shape = { ContinuousCapsule },
-                effects = {
-                    vibrancy()
-                    blur(16.dp.toPx())
-                    lens(18.dp.toPx(), 18.dp.toPx())
-                },
-                highlight = { Highlight.Default.copy(alpha = 0.8f) },
-                shadow = { Shadow.Default.copy(color = Color.Black.copy(alpha = 0.3f)) },
-                onDrawSurface = { drawRect(tint) },
-            )
-            .padding(horizontal = 12.dp, vertical = 9.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            label,
-            color = Color.White,
-            style = MaterialTheme.typography.labelMedium,
-            maxLines = 1,
-        )
-    }
-}
-
 private fun formatClock(milliseconds: Long): String {
     val total = (milliseconds / 1000).coerceAtLeast(0)
     val minutes = total / 60

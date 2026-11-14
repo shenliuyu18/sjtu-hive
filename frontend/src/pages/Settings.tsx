@@ -219,10 +219,11 @@ export function Settings() {
       setCourseState(results[2].status === 'fulfilled' ? results[2].value : null);
       if (results[3].status === 'fulfilled') {
         const value = results[3].value;
-        setWebdav(value);
-        setWebdavUrl(value.url ?? '');
-        setWebdavDir(value.directory ?? '');
-        setWebdavUser(value.username ?? '');
+        setWebdav(value ?? null);
+        // 未配置 WebDAV 时后端可能返回空值，直接取字段会抛 TypeError
+        setWebdavUrl(value?.url ?? '');
+        setWebdavDir(value?.directory ?? '');
+        setWebdavUser(value?.username ?? '');
       }
     });
     void call<number>('app.cacheSize')

@@ -93,8 +93,25 @@ class CanvasApi(private val context: Context) {
         prefs.edit().remove("token").apply()
     }
 
+    /** 冷启动先读磁盘快照，随后页面会刷新覆盖。 */
+    fun coursesCached(): List<CanvasCourse> =
+        HiveCache.getString(context, "canvas:courses")?.let { body ->
+            runCatching { parseCourses(body) }.getOrNull()
+        } ?: emptyList()
+
+    fun filesCached(courseId: Long): List<CanvasFile> =
+        HiveCache.getString(context, "canvas:files:$courseId")?.let { body ->
+            runCatching { parseFiles(body) }.getOrNull()
+        } ?: emptyList()
+
     suspend fun courses(): List<CanvasCourse> = withContext(Dispatchers.IO) {
-        val array = JSONArray(get("/courses?enrollment_state=active&per_page=100&include[]=term"))
+        val body = get("/courses?enrollment_state=active&per_page=100&include[]=term")
+        HiveCache.putString(context, "canvas:courses", body)
+        parseCourses(body)
+    }
+
+    private fun parseCourses(body: String): List<CanvasCourse> {
+        val array = JSONArray(body)
         val result = mutableListOf<CanvasCourse>()
         for (index in 0 until array.length()) {
             val item = array.optJSONObject(index) ?: continue
@@ -107,11 +124,17 @@ class CanvasApi(private val context: Context) {
                 term = item.optJSONObject("term")?.text("name").orEmpty(),
             )
         }
-        result.sortedBy { it.name }
+        return result.sortedBy { it.name }
     }
 
     suspend fun files(courseId: Long): List<CanvasFile> = withContext(Dispatchers.IO) {
-        val array = JSONArray(get("/courses/$courseId/files?per_page=100&sort=name&order=asc"))
+        val body = get("/courses/$courseId/files?per_page=100&sort=name&order=asc")
+        HiveCache.putString(context, "canvas:files:$courseId", body)
+        parseFiles(body)
+    }
+
+    private fun parseFiles(body: String): List<CanvasFile> {
+        val array = JSONArray(body)
         val result = mutableListOf<CanvasFile>()
         for (index in 0 until array.length()) {
             val item = array.optJSONObject(index) ?: continue
@@ -127,7 +150,7 @@ class CanvasApi(private val context: Context) {
                 updatedAt = item.text("updated_at").ifBlank { item.text("created_at") },
             )
         }
-        result
+        return result
     }
 
     suspend fun file(fileId: Long): CanvasFile = withContext(Dispatchers.IO) {
@@ -248,14 +271,29 @@ class CanvasApi(private val context: Context) {
     private suspend fun get(path: String): String {
         val token = token()
         if (token.isEmpty()) ensureSession()
+        val current = token()
         val result = HiveHttp.raw(
             context,
             "$BASE$path",
             "https://oc.sjtu.edu.cn/",
-            headers = if (token.isEmpty()) emptyMap() else mapOf("Authorization" to "Bearer $token"),
+            headers = if (current.isEmpty()) emptyMap() else mapOf("Authorization" to "Bearer $current"),
         )
         if (result.code == 401 || result.code == 403) {
-            if (token.isEmpty()) sessionReady = false
+            // Canvas 会话过期但 jAccount 仍有效时，静默走一次 SSO 换新会话再试一次；
+            // 只有重试仍然失败才报登录失效，避免「无内容/会话过期」被误报成未登录。
+            sessionReady = false
+            val renewed = runCatching { CampusSession.refresh(context, "oc.sjtu.edu.cn") }.getOrDefault(false)
+            ensureSession()
+            val fresh = token()
+            if (renewed || fresh.isNotEmpty()) {
+                val retry = HiveHttp.raw(
+                    context,
+                    "$BASE$path",
+                    "https://oc.sjtu.edu.cn/",
+                    headers = if (fresh.isEmpty()) emptyMap() else mapOf("Authorization" to "Bearer $fresh"),
+                )
+                if (retry.code in 200..299) return retry.body
+            }
             throw CampusAuthException("Canvas 登录已失效，请先在设置中重新登录 jAccount")
         }
         if (result.code !in 200..299) error("Canvas 返回 HTTP ${result.code}")

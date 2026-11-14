@@ -84,6 +84,7 @@ fun OverviewScreen(
 
     LaunchedEffect(loggedIn, reload) {
         if (!loggedIn) return@LaunchedEffect
+        HiveUiCache.loadPersisted(context)
         val cache = HiveUiCache.overview
         if (reload == 0 && cache != null && HiveUiCache.fresh(cache.at)) {
             unread = cache.unread
@@ -124,6 +125,7 @@ fun OverviewScreen(
             recentMail = recentMail,
             at = System.currentTimeMillis(),
         )
+        HiveUiCache.persist(context)
         loading = false
     }
 
@@ -135,6 +137,13 @@ fun OverviewScreen(
             recentMail = cache.recentMail
             return@LaunchedEffect
         }
+        if (mailUnread == 0 && recentMail.isEmpty()) {
+            val cachedMails = mailApi.inboxCached("INBOX").filter { !it.seen }
+            if (cachedMails.isNotEmpty()) {
+                mailUnread = cachedMails.size
+                recentMail = cachedMails.take(2)
+            }
+        }
         mailLoading = true
         runCatching { mailApi.inbox("INBOX", 8) }
             .onSuccess { list ->
@@ -145,6 +154,7 @@ fun OverviewScreen(
                     mailUnread = mailUnread,
                     recentMail = recentMail,
                 )
+                HiveUiCache.persist(context)
             }
         mailLoading = false
     }

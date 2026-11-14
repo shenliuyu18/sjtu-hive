@@ -13,6 +13,7 @@ import (
 	goruntime "runtime"
 	"strings"
 	"sync/atomic"
+	"sync"
 	"time"
 
 	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
@@ -36,6 +37,9 @@ type AppInfo struct {
 type App struct {
 	ctx              context.Context
 	cancel           context.CancelFunc
+	// 前端挂载信号：用于启动看门狗判断 WebView 是否真的把页面跑起来了。
+	frontendMounted  chan struct{}
+	mountedOnce      sync.Once
 	paths            Paths
 	db               *sql.DB
 	logger           *slog.Logger
@@ -77,6 +81,7 @@ func NewApp() *App {
 func (a *App) Startup(ctx context.Context) {
 	a.ctx = ctx
 	a.ctx, a.cancel = context.WithCancel(ctx)
+	a.frontendMounted = make(chan struct{})
 	paths, err := LoadPaths()
 	if err != nil {
 		a.startErr = fmt.Errorf("初始化数据目录失败：%w", err)
@@ -128,7 +133,7 @@ func (a *App) Startup(ctx context.Context) {
 	}
 	a.media = media
 	a.campus = NewCampusSession(a.secrets, a.emit, a.logger)
-	a.timetable = NewTimetable(db, a.campus, a.emit)
+	a.timetable = NewTimetable(db, a.emit)
 	a.todo = NewTodo(db, a.emit)
 	a.registerCore()
 	a.applyInitialWindowSize()
@@ -146,6 +151,35 @@ func (a *App) Startup(ctx context.Context) {
 	a.startExamLoop()
 	a.startTray()
 	a.logger.Info("app started", "version", Version, "data", paths.DataDir, "resource", media.BaseURL())
+	a.startFrontendWatchdog()
+}
+
+// startFrontendWatchdog 处理开机自启时的偶发白屏：
+// WebView2 在登录初期偶尔起不来，页面永远停在内嵌 HTML 之前，前端也就无从自我兜底。
+// 这里等不到 frontendMounted 就重载一次窗口，最多三次；正常启动时它会在 200ms 内返回。
+func (a *App) startFrontendWatchdog() {
+	if a.ctx == nil || a.frontendMounted == nil {
+		return
+	}
+	go func() {
+		delays := []time.Duration{15 * time.Second, 20 * time.Second, 25 * time.Second}
+		for index, delay := range delays {
+			select {
+			case <-a.frontendMounted:
+				return
+			case <-a.ctx.Done():
+				return
+			case <-time.After(delay):
+				if a.logger != nil {
+					a.logger.Warn("frontend not mounted, reloading window", "attempt", index+1)
+				}
+				wruntime.WindowReload(a.ctx)
+			}
+		}
+		if a.logger != nil {
+			a.logger.Error("frontend still not mounted after reloads; 请检查 WebView2 运行时")
+		}
+	}()
 }
 
 func (a *App) startTray() {
@@ -574,6 +608,18 @@ func (a *App) registerCore() {
 		if a.logger != nil {
 			a.logger.Info("frontend ready")
 		}
+		return true, nil
+	})
+	// 渲染层能在启动画面阶段调用它，用来区分「WebView 没起来」和「初始化卡住」。
+	a.router.Handle("app.frontendMounted", func([]json.RawMessage) (any, error) {
+		if a.logger != nil {
+			a.logger.Info("frontend mounted")
+		}
+		a.mountedOnce.Do(func() {
+			if a.frontendMounted != nil {
+				close(a.frontendMounted)
+			}
+		})
 		return true, nil
 	})
 	a.router.Handle("app.info", func([]json.RawMessage) (any, error) {

@@ -34,9 +34,48 @@ class CampusAuthException(message: String) : Exception(message)
  */
 class SchoolCalendarApi(private val context: Context) {
 
+    /** 冷启动先读磁盘快照，随后页面会刷新覆盖。 */
+    fun eventsCached(start: LocalDateTime, end: LocalDateTime): List<SchoolEvent> =
+        HiveCache.getArray(context, "calendar:events:${start}-${end}")?.let { array ->
+            (0 until array.length()).mapNotNull { item ->
+                array.optJSONObject(item)?.let { json ->
+                    runCatching {
+                        SchoolEvent(
+                            id = json.optString("id"),
+                            title = json.optString("title"),
+                            startAt = java.time.LocalDateTime.parse(json.optString("startAt")),
+                            endAt = java.time.LocalDateTime.parse(json.optString("endAt")),
+                            location = json.optString("location"),
+                            calendarName = json.optString("calendarName"),
+                            colorHex = json.optString("colorHex"),
+                            allDay = json.optBoolean("allDay"),
+                        )
+                    }.getOrNull()
+                }
+            }
+        } ?: emptyList()
+
     suspend fun events(start: LocalDateTime, end: LocalDateTime): List<SchoolEvent> = withContext(Dispatchers.IO) {
         try {
-            loadEvents(start, end)
+            loadEvents(start, end).also { events ->
+                runCatching {
+                    val snapshot = org.json.JSONArray()
+                    events.forEach { event ->
+                        snapshot.put(
+                            org.json.JSONObject()
+                                .put("id", event.id)
+                                .put("title", event.title)
+                                .put("startAt", event.startAt.toString())
+                                .put("endAt", event.endAt.toString())
+                                .put("location", event.location)
+                                .put("calendarName", event.calendarName)
+                                .put("colorHex", event.colorHex)
+                                .put("allDay", event.allDay),
+                        )
+                    }
+                    HiveCache.putArray(context, "calendar:events:${start}-${end}", snapshot)
+                }
+            }
         } catch (error: Exception) {
             // 首次登录或日程会话过期时，OkHttp 的 SSO 链路未必能拿到日历会话，
             // 先用隐藏 WebView 静默登录一次日历站，再重试。

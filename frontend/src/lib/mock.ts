@@ -892,25 +892,8 @@ export async function mockCall<T>(
       return true as T;
     }
 
-    case 'timetable.state':
-      return timetableState as T;
-    case 'timetable.listLessons':
-      return timetableLessons as T;
     case 'timetable.query':
       return timetableQuery(String(args[0]), String(args[1])) as T;
-    case 'timetable.sync': {
-      emitOptional(emit, 'timetable.changed', { semester: timetableState.semester });
-      return { ok: true } as T;
-    }
-    case 'timetable.connect':
-      return { ok: true } as T;
-    case 'timetable.disconnect':
-      return { ok: true } as T;
-    case 'timetable.setSemesterStart': {
-      timetableState.semesterStart = String(args[1]);
-      emitOptional(emit, 'timetable.changed', { semester: timetableState.semester });
-      return timetableState as T;
-    }
     case 'timetable.createEvent': {
       const input = args[0] as Record<string, unknown>;
       const event: MockEvent = {
@@ -1278,8 +1261,8 @@ export async function mockCall<T>(
     case 'update.check':
       return {
         available: false,
-        current: '1.3.0',
-        latest: '1.3.0',
+        current: __APP_VERSION__,
+        latest: __APP_VERSION__,
         notes: '',
         publishedAt: '',
         pageURL: 'https://github.com/shenliuyu18/sjtu-hive/releases/latest',

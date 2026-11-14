@@ -118,11 +118,11 @@ class CloudPanApi(private val context: Context) {
     }
 
     /** 下载到缓存目录，供内置预览使用。 */
-    suspend fun downloadToCache(path: String, name: String): java.io.File = withContext(Dispatchers.IO) {
+    suspend fun downloadToCache(path: String, name: String, expectedSize: Long = -1): java.io.File = withContext(Dispatchers.IO) {
         val url = fileUrl(path, download = true)
         val safe = name.replace(Regex("[\\\\/:*?\"<>|]"), "_").ifBlank { "preview.bin" }
         val target = java.io.File(java.io.File(context.cacheDir, "preview"), safe)
-        HiveHttp.download(context, url, target)
+        HiveHttp.download(context, url, target, expectedSize = expectedSize)
     }
 
     /** 云盘组织 ID（分享接口需要）；取当前登录的组织。 */

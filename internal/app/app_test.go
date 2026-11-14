@@ -36,28 +36,51 @@ func TestDPAPIRoundTrip(t *testing.T) {
 	}
 }
 
-func TestTimetableParsers(t *testing.T) {
-	weeks := weekNumbersOf("1-8周(单)")
-	if len(weeks) != 4 || weeks[0] != 1 || weeks[3] != 7 {
-		t.Fatalf("odd weeks: %#v", weeks)
-	}
-	weeks = weekNumbersOf("1-4,6-8周")
-	if len(weeks) != 7 || weeks[6] != 8 {
-		t.Fatalf("range weeks: %#v", weeks)
-	}
-	if start := parseSemesterStart([]json.RawMessage{json.RawMessage(`["2026-09-07 第1周"]`)}); start != "2026-09-07" {
-		t.Fatalf("semester start: %q", start)
-	}
-	if start := parseSemesterStart([]json.RawMessage{json.RawMessage(`[{"date":"2026-09-07"}]`)}); start != "2026-09-07" {
-		t.Fatalf("semester start object: %q", start)
-	}
+func TestSemesterParams(t *testing.T) {
 	xnm, xqm := semesterParams("2026-2027-2")
 	if xnm != "2026" || xqm != "12" {
 		t.Fatalf("semester params: %s %s", xnm, xqm)
 	}
-	start, end, text := periodsOf("3-4", "3-4节")
-	if start != 3 || end != 4 || text != "3-4" {
-		t.Fatalf("periods: %d %d %s", start, end, text)
+	if _, xqm := semesterParams("2026-2027-1"); xqm != "3" {
+		t.Fatalf("semester term: %s", xqm)
+	}
+}
+
+// 课程数据已改为读取交我办日历（school_events），这里固定住口径：
+// 只取「课程」日历且落在区间内的事件，其他日历（考试/会议/私人）不应混进今日课程。
+func TestTimetableQueryUsesSchoolCalendar(t *testing.T) {
+	db, err := OpenStore(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	insert := `INSERT INTO school_events (id, title, start_at, end_at, location, calendar_name, synced_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`
+	for _, row := range [][]any{
+		{"c1", "高等数学I", "2026-11-13T02:00:00Z", "2026-11-13T03:40:00Z", "东上院101", "课程", "2026-11-13T00:00:00Z"},
+		{"e1", "期末考试", "2026-11-13T05:00:00Z", "2026-11-13T07:00:00Z", nil, "考试", "2026-11-13T00:00:00Z"},
+		{"c2", "明天的课", "2026-11-14T02:00:00Z", "2026-11-14T03:40:00Z", nil, "课程", "2026-11-13T00:00:00Z"},
+	} {
+		if _, err := db.Exec(insert, row...); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+
+	timetable := NewTimetable(db, nil)
+	result, err := timetable.Query("2026-11-13T00:00:00Z", "2026-11-14T00:00:00Z", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	items, _ := result["items"].([]map[string]any)
+	if len(items) != 1 {
+		t.Fatalf("期望只返回 1 门当天课程，实际 %d 条：%#v", len(items), items)
+	}
+	if items[0]["title"] != "高等数学I" || items[0]["source"] != "course" {
+		t.Fatalf("课程字段不正确：%#v", items[0])
+	}
+	if items[0]["location"] != "东上院101" {
+		t.Fatalf("教室丢失：%#v", items[0]["location"])
 	}
 }
 

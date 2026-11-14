@@ -18,8 +18,8 @@ android {
         applicationId = "com.sjtuhive.app"
         minSdk = 33
         targetSdk = 37
-        versionCode = 24
-        versionName = "1.3.0"
+        versionCode = 10301
+        versionName = "1.3.1"
     }
 
     buildFeatures { compose = true }
@@ -86,6 +86,10 @@ dependencies {
     implementation("dev.chrisbanes.haze:haze-blur:2.0.1")
     implementation("top.yukonga.miuix.kmp:miuix-core:0.9.4")
     implementation("io.github.kyant0:backdrop:2.0.1")
+    implementation("androidx.media3:media3-exoplayer:1.4.1")
+    implementation("androidx.media3:media3-exoplayer-hls:1.4.1")
+    implementation("androidx.media3:media3-exoplayer-dash:1.4.1")
+    implementation("androidx.media3:media3-ui:1.4.1")
     implementation("io.github.kyant0:capsule:2.1.3")
     implementation("top.yukonga.miuix.kmp:miuix-blur-android:0.9.4")
     implementation("top.yukonga.miuix.kmp:miuix-ui-android:0.9.4")

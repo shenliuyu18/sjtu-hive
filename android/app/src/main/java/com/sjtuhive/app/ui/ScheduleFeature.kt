@@ -76,6 +76,7 @@ fun ScheduleScreen(
 
     LaunchedEffect(loggedIn, reload) {
         if (!loggedIn) return@LaunchedEffect
+        HiveUiCache.loadPersisted(context)
         val cache = HiveUiCache.schedule
         if (reload == 0 && cache != null && HiveUiCache.fresh(cache.at)) {
             events = cache.events
@@ -115,6 +116,7 @@ fun ScheduleScreen(
                 examError = examError,
                 at = System.currentTimeMillis(),
             )
+            HiveUiCache.persist(context)
         }
         loading = false
     }

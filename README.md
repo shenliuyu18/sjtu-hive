@@ -92,9 +92,29 @@ cd android
 gradle :app:assembleDebug   # 或 :app:assembleRelease（需本地 keystore.properties）
 ```
 
-Release APK 使用维护者本地正式签名；`keystore.properties` 与 `keystore/` 不入库。R8 规则见 `app/proguard-rules.pro`，每次发布归档 `mapping.txt`。
+Release APK 使用维护者本地正式签名；`keystore.properties` 与 `keystore/` 不入库（见 `android/.gitignore`）。R8 规则见 `app/proguard-rules.pro`，每次发布归档 `mapping.txt`。
 
-版本约定：对外只发布稳定的 `x.y.z` 版本；开发构建使用递增的预发布号，仅在本地使用。
+### 版本与发版
+
+版本号只有一处来源：仓库根目录的 `VERSION`。其余位置由脚本写入，不要手改。
+
+```sh
+node tools/sync-version.mjs              # 把 VERSION 同步到各文件
+node tools/sync-version.mjs --set 1.4.0  # 升版本并同步
+node tools/sync-version.mjs --check      # 只校验（CI 使用）
+```
+
+同步目标：`internal/app/paths.go`、`wails.json`、`frontend/package.json`、`android/app/build.gradle.kts`、`site/index.html` 的下载链接与版本号。前端源码里不再保存版本字面量（`__APP_VERSION__` 由 Vite 注入）；`CHANGELOG.md` 与站点上的发布说明正文属于历史记录，仍由人工维护。
+
+发版用一条命令产出三件套：
+
+```sh
+node tools/release.mjs
+```
+
+脚本依次做：校验版本号 → 构建前端 → 跑 Go 测试 → 构建 Windows 绿色版 ZIP → 构建 NSIS 安装包 → 构建 Android 签名 APK → 计算 SHA-256。产物在 `dist/`，文件名与 `site/index.html` 的下载链接一一对应。安装包需要 NSIS（`winget install --id NSIS.NSIS -e`），没有时可加 `--skip-installer`；只出某一端用 `--skip-android` / `--skip-windows`。
+
+版本约定：对外只发布稳定的 `x.y.z` 版本；开发构建使用递增的预发布号，仅在本地使用。Android 的 `versionCode` 由版本号推导（`1.3.0` → `10300`），不需要手改；它必须单调递增，否则老用户无法覆盖安装。
 
 ## 已知限制
 
@@ -113,4 +133,4 @@ Release APK 使用维护者本地正式签名；`keystore.properties` 与 `keyst
 
 ## 许可
 
-应用源码以 MIT License 发布（见 `LICENSE`）。第三方库与素材许可见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。Android 端部分玻璃组件来自 legado-with-MD3，按 GPL-3.0 使用。
+本项目以 **GNU General Public License v3.0** 发布（见 `LICENSE`）。第三方依赖与素材的许可见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)；其中 Android 端的玻璃与动效组件改编自 legado-with-MD3 与 weishu/KernelSU，原始版权声明保留在对应文件头部。

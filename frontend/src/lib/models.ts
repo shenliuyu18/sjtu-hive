@@ -123,9 +123,10 @@ export interface TimetableItem {
 }
 
 export interface TimetableQuery {
-  semester: string;
+  // 课程来自交我办日历、本地日程来自 calendar_events；semester/warnings 已随课表模块下线。
   items: TimetableItem[];
-  warnings: string[];
+  semester?: string;
+  warnings?: string[];
 }
 
 export interface TodoItem {

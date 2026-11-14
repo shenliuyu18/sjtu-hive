@@ -41,6 +41,11 @@ func ApplyStartupPriority() {
 // the old Run-key mechanism, which duplicated the newer logon task.
 func migrateAutostartName() {
 	_ = deleteRunValue(LegacyAppName)
+	// 任务存在时以任务为唯一启动方式：顺手清掉历史版本遗留的 Run 项。
+	// 旧版本用 %q 写入，注册表里存的是带双反斜杠的路径，Windows 解析不到，启动必然失败。
+	if autostartTaskExists() {
+		_ = deleteRunValue(AppName)
+	}
 }
 
 func runKey() (registry.Key, error) {
@@ -82,7 +87,8 @@ func setOpenAtLogin(enabled bool) error {
 		return err
 	}
 	defer key.Close()
-	return key.SetStringValue(AppName, fmt.Sprintf("%q --autostart", exe))
+	// 注意不能用 %q：它会把反斜杠转义成 \\，写进注册表后路径无法解析。
+	return key.SetStringValue(AppName, fmt.Sprintf("\"%s\" --autostart", exe))
 }
 
 func openAtLoginValue() (bool, error) {

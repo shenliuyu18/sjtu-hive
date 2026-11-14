@@ -14,3 +14,9 @@ Thumbs.db
 frontend/package.json.md5
 
 tmp/
+dist/
+
+# Android 签名密钥（android/.gitignore 里也有一份，这里再兜一层）
+keystore.properties
+*.jks
+*.keystore

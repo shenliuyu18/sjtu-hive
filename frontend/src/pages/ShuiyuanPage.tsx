@@ -5,6 +5,7 @@ import {
   Bookmark,
   ExternalLink,
   Hash,
+  Link2,
   Loader2,
   MessageSquare,
   Plus,
@@ -20,7 +21,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { call } from '@/lib/bridge';
+import { call, copyText } from '@/lib/bridge';
 import type {
   ShuiyuanActivityItem,
   ShuiyuanBookmarkItem,
@@ -814,6 +815,17 @@ export function ShuiyuanPage() {
                   <div className="flex shrink-0 items-center gap-1">
                     <Button size="sm" variant="ghost" onClick={() => void toggleBookmark()} title="收藏">
                       <Bookmark className={cn('size-3.5', detail.bookmarked && 'fill-current text-accent')} />
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={async () => {
+                        await copyText(`${origin}/t/${detail.id}`);
+                        toast.success('帖子链接已复制');
+                      }}
+                      title="复制帖子链接"
+                    >
+                      <Link2 className="size-3.5" />
                     </Button>
                     <Button
                       size="sm"

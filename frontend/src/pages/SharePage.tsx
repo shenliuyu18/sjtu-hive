@@ -116,6 +116,10 @@ export function SharePage() {
   const [actionBusy, setActionBusy] = useState(false);
   const [preview, setPreview] = useState<DocumentContent | null>(null);
 
+  // 后端个别分支可能返回 null（例如自动登录未取到会话），
+  // 这里统一兜底成「未登录」，否则页面会停在加载态再也出不来。
+  const settled = (next: ShareState | null | undefined): ShareState => next ?? { loggedIn: false };
+
   const handleError = useCallback((cause: unknown, fallback: string) => {
     const message = cause instanceof Error ? cause.message : fallback;
     if (message.includes('登录已失效')) {
@@ -142,7 +146,7 @@ export function SharePage() {
       try {
         const value = await call<ShareState>('share.state');
         if (cancelled) return;
-        setState(value);
+        setState(settled(value));
         if (value?.loggedIn) {
           void loadBanners();
           return;
@@ -157,7 +161,7 @@ export function SharePage() {
         try {
           const next = await call<ShareState>('share.loginSilent');
           if (cancelled) return;
-          setState(next);
+          setState(settled(next));
           if (next?.loggedIn) {
             setAutoError('');
             toast.success('已复用设置中的 jAccount 登录');
@@ -185,7 +189,7 @@ export function SharePage() {
     const toastId = toast.loading('请在打开的 Edge 窗口中完成 jAccount 登录…');
     try {
       const next = await call<ShareState>('share.login');
-      setState(next);
+      setState(settled(next));
       toast.success('已登录传承交大', { id: toastId });
       void loadBanners();
     } catch (cause) {
@@ -200,7 +204,7 @@ export function SharePage() {
     setAutoTrying(true);
     try {
       const next = await call<ShareState>('share.loginSilent');
-      setState(next);
+      setState(settled(next));
       if (next?.loggedIn) {
         toast.success('已复用设置中的 jAccount 登录');
         void loadBanners();
@@ -214,7 +218,7 @@ export function SharePage() {
 
   const logout = async () => {
     try {
-      setState(await call<ShareState>('share.logout'));
+      setState(settled(await call<ShareState>('share.logout')));
       setCourses([]);
       setMaterials([]);
       setSelectedCourse(null);
