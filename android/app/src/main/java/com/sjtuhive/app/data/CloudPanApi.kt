@@ -296,6 +296,33 @@ class CloudPanApi(private val context: Context) {
             }
         }
 
+    /** 个人空间配额（已用 / 总量），对应桌面端 state 里的 UsedBytes/TotalBytes。 */
+    suspend fun quota(): LongArray = withContext(Dispatchers.IO) {
+        val state = ensureSession()
+        val endpoint = "$ORIGIN/user/v1/space/1?user_token=${enc(state.userToken)}" +
+            "&device_id=${enc(deviceId())}"
+        val result = HiveHttp.raw(context, endpoint, "$ORIGIN/")
+        if (result.code !in 200..299) error("读取云盘配额失败：HTTP ${result.code}")
+        val body = JSONObject(result.body)
+        longArrayOf(parseSize(body.text("size")), parseSize(body.text("capacity")))
+    }
+
+    private fun parseSize(value: String): Long {
+        val text = value.trim()
+        if (text.isEmpty()) return 0L
+        text.toLongOrNull()?.let { return it }
+        val match = Regex("([0-9.]+)\\s*(TB|GB|MB|KB|B)", RegexOption.IGNORE_CASE).find(text) ?: return 0L
+        val amount = match.groupValues[1].toDoubleOrNull() ?: return 0L
+        val unit = when (match.groupValues[2].uppercase()) {
+            "TB" -> 1024.0 * 1024 * 1024 * 1024
+            "GB" -> 1024.0 * 1024 * 1024
+            "MB" -> 1024.0 * 1024
+            "KB" -> 1024.0
+            else -> 1.0
+        }
+        return (amount * unit).toLong()
+    }
+
     suspend fun recycled(): List<RecycledItem> = withContext(Dispatchers.IO) {
         val state = ensureSession()
         val orgId = organizationId()

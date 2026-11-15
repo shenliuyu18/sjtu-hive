@@ -15,6 +15,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Checklist
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Email
 import androidx.compose.material.icons.outlined.FolderShared
@@ -65,6 +67,8 @@ fun OverviewScreen(
     onOpenClassroom: () -> Unit,
     onOpenCourse: () -> Unit,
     onOpenShare: () -> Unit,
+    onOpenTodo: () -> Unit = {},
+    onOpenSearch: () -> Unit = {},
     onOpenMessages: () -> Unit,
     onOpenMail: (Int) -> Unit,
 ) {
@@ -221,6 +225,8 @@ fun OverviewScreen(
                     onOpenClassroom = onOpenClassroom,
                     onOpenCourse = onOpenCourse,
                     onOpenShare = onOpenShare,
+                    onOpenTodo = onOpenTodo,
+                    onOpenSearch = onOpenSearch,
                 )
             }
             return@Column
@@ -392,6 +398,8 @@ fun OverviewScreen(
                 onOpenClassroom = onOpenClassroom,
                 onOpenCourse = onOpenCourse,
                 onOpenShare = onOpenShare,
+                onOpenTodo = onOpenTodo,
+                onOpenSearch = onOpenSearch,
             )
         }
     }
@@ -423,6 +431,8 @@ private fun FeatureGrid(
     onOpenClassroom: () -> Unit,
     onOpenCourse: () -> Unit,
     onOpenShare: () -> Unit,
+    onOpenTodo: () -> Unit = {},
+    onOpenSearch: () -> Unit = {},
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -470,6 +480,22 @@ private fun FeatureGrid(
                 title = "传承交大",
                 subtitle = "共享资料",
                 onClick = onOpenShare,
+                modifier = Modifier.weight(1f),
+            )
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FeatureTile(
+                icon = Icons.Outlined.Checklist,
+                title = "待办",
+                subtitle = "本地与 Canvas DDL",
+                onClick = onOpenTodo,
+                modifier = Modifier.weight(1f),
+            )
+            FeatureTile(
+                icon = Icons.Outlined.Search,
+                title = "搜索",
+                subtitle = "课程、邮件、日程",
+                onClick = onOpenSearch,
                 modifier = Modifier.weight(1f),
             )
         }

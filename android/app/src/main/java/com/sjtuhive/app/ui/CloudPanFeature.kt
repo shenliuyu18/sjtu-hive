@@ -184,6 +184,14 @@ fun CloudPanScreen(
         recycledLoading = false
     }
 
+    var quotaText by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(reload) {
+        quotaText = runCatching {
+            val (used, total) = api.quota().let { it[0] to it[1] }
+            "已用 ${formatStorage(used)} / ${formatStorage(total)}"
+        }.getOrNull()
+    }
+
     LaunchedEffect(transfers.count { it.status == "done" }) {
         if (transfers.any { it.status == "done" }) reload++
     }
@@ -219,6 +227,13 @@ fun CloudPanScreen(
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+            quotaText?.let {
+                Text(
+                    it,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             Row(
                 Modifier
                     .fillMaxWidth()
@@ -903,4 +918,12 @@ private fun formatSize(bytes: Long): String = when {
     bytes < 1024 * 1024 -> "%.1f KB".format(bytes / 1024.0)
     bytes < 1024L * 1024 * 1024 -> "%.1f MB".format(bytes / 1024.0 / 1024.0)
     else -> "%.1f GB".format(bytes / 1024.0 / 1024.0 / 1024.0)
+}
+
+private fun formatStorage(bytes: Long): String {
+    if (bytes <= 0) return "—"
+    val gb = bytes / 1024.0 / 1024 / 1024
+    if (gb >= 1) return String.format("%.1f GB", gb)
+    val mb = bytes / 1024.0 / 1024
+    return String.format("%.0f MB", mb)
 }

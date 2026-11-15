@@ -369,6 +369,9 @@ private fun HiveShell(
     var showClassroom by remember { mutableStateOf(false) }
     var showCourseCommunity by remember { mutableStateOf(false) }
     var showShare by remember { mutableStateOf(false) }
+    var showTodo by remember { mutableStateOf(false) }
+    var showExam by remember { mutableStateOf(false) }
+    var showSearch by remember { mutableStateOf(false) }
     var showMessages by remember { mutableStateOf(false) }
     var servicesFullscreen by remember { mutableStateOf(false) }
     // 应用内深链：从链接（水源帖子/Canvas 课程等）跳进来时携带的初始目标
@@ -387,6 +390,9 @@ private fun HiveShell(
             showCourseCommunity = false
             showShare = false
             showMessages = false
+            showTodo = false
+            showExam = false
+            showSearch = false
             servicesFullscreen = false
             when (link) {
                 is HiveLink.ShuiyuanTopic -> {
@@ -487,6 +493,8 @@ private fun HiveShell(
                         onOpenClassroom = { showClassroom = true },
                         onOpenCourse = { showCourseCommunity = true },
                         onOpenShare = { showShare = true },
+                        onOpenTodo = { showTodo = true },
+                        onOpenSearch = { showSearch = true },
                         onOpenMessages = { showMessages = true },
                         onOpenMail = { index ->
                             emailRequest = "INBOX" to index
@@ -498,6 +506,7 @@ private fun HiveShell(
                         loggedIn = loggedIn,
                         onLogin = { loginTarget = CalendarLogin },
                         onLoginTeachingSite = { loginTarget = TeachingLogin },
+                        onOpenExam = { showExam = true },
                     )
                     HiveTabId.Services -> if (servicesEnabled) {
                         ServicesScreen(
@@ -580,6 +589,22 @@ private fun HiveShell(
         }
         if (showCourseCommunity) {
             CourseCommunityScreen(context = context, onClose = { showCourseCommunity = false })
+        }
+        if (showTodo) {
+            TodoScreen(context = context, onClose = { showTodo = false })
+        }
+        if (showExam) {
+            ExamScreen(context = context, onClose = { showExam = false })
+        }
+        if (showSearch) {
+            SearchScreen(
+                context = context,
+                onClose = { showSearch = false },
+                onOpenCanvas = { showSearch = false; showCanvas = true },
+                onOpenEmail = { showSearch = false; showEmail = true },
+                onOpenSchedule = { showSearch = false; selectedId = HiveTabId.Schedule },
+                onOpenTodo = { showSearch = false; showTodo = true },
+            )
         }
         if (showShare) {
             ShareScreen(context = context, onClose = { showShare = false })

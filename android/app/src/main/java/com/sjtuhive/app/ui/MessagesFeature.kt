@@ -167,6 +167,8 @@ fun MessagesScreen(
             MessageDetail(detail, onBack = { selected = null })
             return@Column
         }
+        val prefs = remember { context.getSharedPreferences("hive_msg", android.content.Context.MODE_PRIVATE) }
+        var readIds by remember { mutableStateOf(prefs.getStringSet("read_ids", emptySet()) ?: emptySet()) }
         Row(
             Modifier.fillMaxWidth().padding(start = 24.dp, end = 12.dp, top = 12.dp, bottom = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -185,6 +187,14 @@ fun MessagesScreen(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+            }
+            if (unread > 0) {
+                TextButton(onClick = {
+                    val ids = readIds + messages.map { it.id }
+                    readIds = ids
+                    prefs.edit().putStringSet("read_ids", ids).apply()
+                    unread = 0
+                }) { Text("全部已读") }
             }
             if (onClose != null) {
                 TextButton(onClick = onClose) { Text("关闭") }

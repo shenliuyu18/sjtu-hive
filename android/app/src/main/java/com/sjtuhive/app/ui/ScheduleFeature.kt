@@ -62,6 +62,7 @@ fun ScheduleScreen(
     loggedIn: Boolean,
     onLogin: () -> Unit,
     onLoginTeachingSite: () -> Unit,
+    onOpenExam: () -> Unit = {},
 ) {
     val today = remember { LocalDate.now() }
     val cached = HiveUiCache.schedule
@@ -158,6 +159,7 @@ fun ScheduleScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+            TextButton(onClick = onOpenExam) { Text("考试") }
             TextButton(onClick = { reload++ }, enabled = !loading) { Text("刷新") }
         }
 
