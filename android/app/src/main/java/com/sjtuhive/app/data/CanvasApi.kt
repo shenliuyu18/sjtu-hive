@@ -40,6 +40,20 @@ data class CanvasAnnouncement(
     val url: String,
 )
 
+data class CanvasPage(
+    val url: String,
+    val title: String,
+    val updatedAt: String,
+)
+
+data class CanvasDiscussion(
+    val id: Long,
+    val title: String,
+    val postedAt: String,
+    val replies: Int,
+    val htmlUrl: String,
+)
+
 data class CanvasModuleItem(
     val id: Long,
     val title: String,
@@ -219,6 +233,48 @@ class CanvasApi(private val context: Context) {
                 url = item.text("html_url"),
             )
         }
+    }
+
+    /** 课程页面（Pages）：列表与正文。 */
+    suspend fun pages(courseId: Long): List<CanvasPage> = withContext(Dispatchers.IO) {
+        val array = JSONArray(get("/courses/$courseId/pages?per_page=100&sort=title"))
+        (0 until array.length()).mapNotNull { index ->
+            val item = array.optJSONObject(index) ?: return@mapNotNull null
+            val url = item.text("url")
+            if (url.isEmpty()) return@mapNotNull null
+            CanvasPage(
+                url = url,
+                title = item.text("title").ifBlank { url },
+                updatedAt = item.text("updated_at"),
+            )
+        }
+    }
+
+    suspend fun pageBody(courseId: Long, pageUrl: String): CanvasDoc = withContext(Dispatchers.IO) {
+        val item = JSONObject(get("/courses/$courseId/pages/$pageUrl"))
+        CanvasDoc(title = item.text("title"), html = item.text("body"))
+    }
+
+    /** 课程讨论（Discussion Topics）：列表与正文。 */
+    suspend fun discussions(courseId: Long): List<CanvasDiscussion> = withContext(Dispatchers.IO) {
+        val array = JSONArray(get("/courses/$courseId/discussion_topics?per_page=100"))
+        (0 until array.length()).mapNotNull { index ->
+            val item = array.optJSONObject(index) ?: return@mapNotNull null
+            val title = item.text("title")
+            if (title.isEmpty()) return@mapNotNull null
+            CanvasDiscussion(
+                id = item.optLong("id"),
+                title = title,
+                postedAt = item.text("posted_at").ifBlank { item.text("created_at") },
+                replies = item.optInt("discussion_subentry_count"),
+                htmlUrl = item.text("html_url"),
+            )
+        }
+    }
+
+    suspend fun discussionBody(courseId: Long, id: Long): CanvasDoc = withContext(Dispatchers.IO) {
+        val item = JSONObject(get("/courses/$courseId/discussion_topics/$id"))
+        CanvasDoc(title = item.text("title"), html = item.text("message"))
     }
 
     suspend fun modules(courseId: Long): List<CanvasModule> = withContext(Dispatchers.IO) {

@@ -115,6 +115,9 @@ fun CanvasScreen(
     var error by remember { mutableStateOf<String?>(null) }
     var reload by remember { mutableIntStateOf(0) }
     var showTokenDialog by remember { mutableStateOf(false) }
+    var pages by remember { mutableStateOf<List<com.sjtuhive.app.data.CanvasPage>>(emptyList()) }
+    var discussions by remember { mutableStateOf<List<com.sjtuhive.app.data.CanvasDiscussion>>(emptyList()) }
+    var exporting by remember { mutableStateOf(false) }
     var reading by remember { mutableStateOf<CanvasDoc?>(null) }
     var opening by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -147,6 +150,8 @@ fun CanvasScreen(
                     "modules" -> modules = api.modules(current.id)
                     "assignments" -> assignments = api.assignments(current.id)
                     "announcements" -> announcements = api.announcements(current.id)
+                    "pages" -> pages = api.pages(current.id)
+                    "discussions" -> discussions = api.discussions(current.id)
                     else -> {
                         if (files.isEmpty()) {
                             runCatching { files = api.filesCached(current.id) }
@@ -216,6 +221,8 @@ fun CanvasScreen(
                         section == "modules" -> "${modules.size} 个模块"
                         section == "assignments" -> "${assignments.size} 个作业"
                         section == "announcements" -> "${announcements.size} 条公告"
+                        section == "pages" -> "${pages.size} 个页面"
+                        section == "discussions" -> "${discussions.size} 个讨论"
                         else -> "${files.size} 个文件"
                     },
                     style = MaterialTheme.typography.labelSmall,
@@ -273,6 +280,8 @@ fun CanvasScreen(
                         "files" to "文件",
                         "modules" to "模块",
                         "assignments" to "作业",
+                        "pages" to "页面",
+                        "discussions" to "讨论",
                         "announcements" to "公告",
                     ).forEach { (key, label) ->
                         FilterChip(
@@ -469,7 +478,84 @@ fun CanvasScreen(
                                 item { Text("这门课程没有公告。", color = MaterialTheme.colorScheme.onSurfaceVariant) }
                             }
                         }
+                        "pages" -> {
+                            items(pages, key = { "pg-${it.url}" }) { page ->
+                                Column(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(16.dp))
+                                        .background(MaterialTheme.colorScheme.surface)
+                                        .clickable {
+                                            val current = course ?: return@clickable
+                                            openDoc("") { api.pageBody(current.id, page.url) }
+                                        }
+                                        .padding(14.dp),
+                                    verticalArrangement = Arrangement.spacedBy(3.dp),
+                                ) {
+                                    Text(page.title, style = MaterialTheme.typography.titleSmall)
+                                    Text(
+                                        "更新于 ${page.updatedAt.replace("T", " ").take(16)}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                            if (pages.isEmpty() && error == null) {
+                                item { Text("这门课程没有页面。", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                            }
+                        }
+                        "discussions" -> {
+                            items(discussions, key = { "dc-${it.id}" }) { discussion ->
+                                Column(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(16.dp))
+                                        .background(MaterialTheme.colorScheme.surface)
+                                        .clickable {
+                                            val current = course ?: return@clickable
+                                            openDoc(discussion.htmlUrl) { api.discussionBody(current.id, discussion.id) }
+                                        }
+                                        .padding(14.dp),
+                                    verticalArrangement = Arrangement.spacedBy(3.dp),
+                                ) {
+                                    Text(discussion.title, style = MaterialTheme.typography.titleSmall)
+                                    Text(
+                                        listOf(
+                                            discussion.postedAt.replace("T", " ").take(16),
+                                            "${discussion.replies} 条回复",
+                                        ).filter { it.isNotBlank() }.joinToString(" · "),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                            if (discussions.isEmpty() && error == null) {
+                                item { Text("这门课程没有讨论。", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                            }
+                        }
                         else -> {
+                            if (files.isNotEmpty()) {
+                                item {
+                                    TextButton(
+                                        enabled = !exporting,
+                                        onClick = {
+                                            val current = course ?: return@TextButton
+                                            scope.launch {
+                                                exporting = true
+                                                val result = runCatching { exportAllFiles(api, context, current, files) }
+                                                toast(
+                                                    context,
+                                                    result.fold(
+                                                        { "已导出 $it 个文件到下载目录" },
+                                                        { "导出失败：${it.message}" },
+                                                    ),
+                                                )
+                                                exporting = false
+                                            }
+                                        },
+                                    ) { Text(if (exporting) "导出中…" else "全部导出到下载目录") }
+                                }
+                            }
                             items(files, key = { it.id }) { file ->
                                 Row(
                                     Modifier
@@ -614,4 +700,22 @@ blockquote{border-left:3px solid #3A4150;margin:8px 0;padding-left:12px;color:#A
 table{border-collapse:collapse;width:100%}
 td,th{border:1px solid #2A303A;padding:6px 8px}
 </style></head><body><h1>$title</h1>${doc.html}</body></html>"""
+}
+
+/** 批量导出：把课程文件逐个下载并复制到系统下载目录的 Canvas/<课程名>/ 下。 */
+private suspend fun exportAllFiles(
+    api: com.sjtuhive.app.data.CanvasApi,
+    context: android.content.Context,
+    course: com.sjtuhive.app.data.CanvasCourse,
+    files: List<com.sjtuhive.app.data.CanvasFile>,
+): Int = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+    var count = 0
+    files.forEach { file ->
+        runCatching {
+            val cached = api.download(file, context.cacheDir)
+            saveToDownloads(context, cached, file.name)
+            count++
+        }
+    }
+    count
 }

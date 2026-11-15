@@ -35,6 +35,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.outlined.AccountCircle
 import androidx.compose.material.icons.outlined.Build
+import androidx.compose.material.icons.outlined.Backup
 import androidx.compose.material.icons.outlined.CleaningServices
 import androidx.compose.material.icons.outlined.ChevronRight
 import androidx.compose.material.icons.outlined.Info
@@ -89,7 +90,7 @@ import io.legado.app.ui.theme.LocalIsDark
 import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
 
-private enum class SettingsSection { None, Account, Appearance, Labs, Storage, About }
+private enum class SettingsSection { None, Account, Appearance, Labs, Storage, Backup, About }
 
 @Composable
 fun SettingsScreen(
@@ -186,6 +187,9 @@ fun SettingsScreen(
                     section = SettingsSection.Labs
                 }
                 MenuDivider()
+                SettingsMenuRow(Icons.Outlined.Backup, "备份与恢复") {
+                    section = SettingsSection.Backup
+                }
                 SettingsMenuRow(Icons.Outlined.CleaningServices, "存储与缓存") {
                     section = SettingsSection.Storage
                 }
@@ -345,6 +349,9 @@ fun SettingsScreen(
                 }
             }
 
+            SettingsSection.Backup -> SettingsSubPage("备份与恢复", { section = SettingsSection.None }) {
+                BackupPage(context)
+            }
             SettingsSection.Storage -> SettingsSubPage("存储与缓存", { section = SettingsSection.None }) {
                 var enabledAuto by remember { mutableStateOf(HiveCacheManager.enabledCategories(context)) }
                 var scheduleValue by remember { mutableStateOf(HiveCacheManager.schedule(context)) }

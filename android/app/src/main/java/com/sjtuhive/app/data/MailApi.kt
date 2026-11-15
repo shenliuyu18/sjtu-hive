@@ -240,6 +240,22 @@ class MailApi(private val context: Context) {
         }
     }
 
+    /** 把邮件移动到目标文件夹（回收站/恢复用）：复制后标记删除并 expunge 源文件夹。 */
+    suspend fun move(fromFolder: String, index: Int, toFolder: String) = withContext(Dispatchers.IO) {
+        val account = account() ?: error("邮箱未配置")
+        withStore<Unit>(account) { store ->
+            val source = store.getFolder(fromFolder)
+            source.open(javax.mail.Folder.READ_WRITE)
+            val target = store.getFolder(toFolder)
+            if (!target.exists()) target.create(javax.mail.Folder.HOLDS_MESSAGES)
+            val message = source.getMessage(index)
+            source.copyMessages(arrayOf(message), target)
+            message.setFlag(javax.mail.Flags.Flag.DELETED, true)
+            // expunge 只作用于当前文件夹里标记删除的邮件（通常就这一封）
+            source.close(true)
+        }
+    }
+
     private fun <T> withStore(account: MailAccount, block: (javax.mail.Store) -> T): T {
         val properties = Properties().apply {
             put("mail.store.protocol", "imaps")

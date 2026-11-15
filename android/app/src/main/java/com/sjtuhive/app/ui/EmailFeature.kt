@@ -79,6 +79,30 @@ fun EmailScreen(
     // 详情页是同一屏内的分支；列表状态必须提升到这里，返回后才会停在原位置。
     val listState = rememberLazyListState()
 
+    val draftPrefs = remember { context.getSharedPreferences("hive_mail_draft", android.content.Context.MODE_PRIVATE) }
+    var draftRestored by remember { mutableStateOf(false) }
+    LaunchedEffect(composing) {
+        if (!composing) {
+            draftRestored = false
+            return@LaunchedEffect
+        }
+        if (draftRestored) return@LaunchedEffect
+        composeTo = draftPrefs.getString("to", "").orEmpty()
+        composeSubject = draftPrefs.getString("subject", "").orEmpty()
+        composeBody = draftPrefs.getString("body", "").orEmpty()
+        draftRestored = true
+    }
+    // 草稿自动保存：停止输入 0.8 秒后落盘，关掉写信也不会丢
+    LaunchedEffect(composing, composeTo, composeSubject, composeBody) {
+        if (!composing || !draftRestored) return@LaunchedEffect
+        kotlinx.coroutines.delay(800)
+        draftPrefs.edit()
+            .putString("to", composeTo)
+            .putString("subject", composeSubject)
+            .putString("body", composeBody)
+            .apply()
+    }
+
     LaunchedEffect(configured) {
         if (!configured) return@LaunchedEffect
         runCatching { folders = api.folders() }
@@ -210,7 +234,16 @@ fun EmailScreen(
         }
 
         if (openIndex != 0) {
-            MailBody(api, selectedFolder, openIndex, messages.firstOrNull { it.index == openIndex })
+            MailBody(
+                api = api,
+                folder = selectedFolder,
+                index = openIndex,
+                summary = messages.firstOrNull { it.index == openIndex },
+                onMoved = {
+                    openIndex = 0
+                    reload++
+                },
+            )
             return@Column
         }
 
@@ -325,6 +358,7 @@ fun EmailScreen(
                                     composeTo = ""
                                     composeSubject = ""
                                     composeBody = ""
+                                    draftPrefs.edit().clear().apply()
                                 }
                                 .onFailure {
                                     Toast.makeText(
@@ -351,8 +385,11 @@ private fun MailBody(
     folder: String,
     index: Int,
     summary: MailSummary?,
+    onMoved: () -> Unit = {},
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var moving by remember { mutableStateOf(false) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
     var body by remember { mutableStateOf("") }
@@ -379,11 +416,37 @@ private fun MailBody(
             style = MaterialTheme.typography.titleMedium,
         )
         if (summary != null) {
-            Text(
-                listOf(summary.from, summary.date).filter { it.isNotBlank() }.joinToString(" · "),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    listOf(summary.from, summary.date).filter { it.isNotBlank() }.joinToString(" · "),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(
+                    enabled = !moving,
+                    onClick = {
+                        val target = if (folder == "Trash") "INBOX" else "Trash"
+                        scope.launch {
+                            moving = true
+                            runCatching { api.move(folder, index, target) }
+                                .onSuccess {
+                                    Toast.makeText(
+                                        context,
+                                        if (target == "Trash") "已移到回收站" else "已恢复到收件箱",
+                                        Toast.LENGTH_SHORT,
+                                    ).show()
+                                    onMoved()
+                                }
+                                .onFailure { Toast.makeText(context, it.message ?: "操作失败", Toast.LENGTH_SHORT).show() }
+                            moving = false
+                        }
+                    },
+                ) { Text(if (folder == "Trash") "恢复到收件箱" else "移到回收站") }
+            }
         }
         if (attachments.isNotEmpty()) {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
