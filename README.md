@@ -4,7 +4,7 @@
 
 功能覆盖 Canvas 资料、校园邮箱、交我办日程与考试、办事大厅（测试功能）、课堂视频、交大云盘、水源社区、选课社区、传承交大、TODO、全局搜索，以及本地笔记/文件工作台与终端。
 
-> 本应用参考了[Dela](https://github.com/Chang-Yo/Dela)和[J-aide（交我汇）](https://geek.sjtu.edu.cn/products/jaide)的功能实现，但未使用其代码。
+> 本应用参考了[Dela](https://github.com/Chang-Yo/Dela)和[jAide（交我汇）](https://geek.sjtu.edu.cn/products/jaide)的功能实现，但未使用其代码。
 > 本应用是参考交大公开接口的独立实现，与上海交通大学无隶属关系。
 
 - 官网：<https://shenliuyu18.github.io/sjtu-hive/>
