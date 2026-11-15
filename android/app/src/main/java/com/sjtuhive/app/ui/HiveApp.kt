@@ -371,6 +371,54 @@ private fun HiveShell(
     var showShare by remember { mutableStateOf(false) }
     var showMessages by remember { mutableStateOf(false) }
     var servicesFullscreen by remember { mutableStateOf(false) }
+    // 应用内深链：从链接（水源帖子/Canvas 课程等）跳进来时携带的初始目标
+    var linkTopicId by remember { mutableStateOf<Long?>(null) }
+    var linkUsername by remember { mutableStateOf<String?>(null) }
+    var linkCategory by remember { mutableStateOf<String?>(null) }
+    var linkCanvasCourse by remember { mutableStateOf<Long?>(null) }
+
+    DisposableEffect(Unit) {
+        val listener: (HiveLink) -> Unit = { link ->
+            // 模块互斥：先收起其他全屏模块，避免两个模块叠在一起
+            showShuiyuan = false
+            showCanvas = false
+            showEmail = false
+            showClassroom = false
+            showCourseCommunity = false
+            showShare = false
+            showMessages = false
+            servicesFullscreen = false
+            when (link) {
+                is HiveLink.ShuiyuanTopic -> {
+                    linkTopicId = link.id
+                    showShuiyuan = true
+                }
+                is HiveLink.ShuiyuanUser -> {
+                    linkUsername = link.username
+                    showShuiyuan = true
+                }
+                is HiveLink.ShuiyuanCategory -> {
+                    linkCategory = link.slug
+                    showShuiyuan = true
+                }
+                is HiveLink.ShuiyuanSearch -> {
+                    if (link.query.isNotEmpty()) linkUsername = null
+                    showShuiyuan = true
+                }
+                is HiveLink.CanvasCourse -> {
+                    linkCanvasCourse = link.courseId
+                    showCanvas = true
+                }
+                HiveLink.Classroom -> showClassroom = true
+                HiveLink.CloudPan -> selectedId = HiveTabId.CloudPan
+                HiveLink.CourseCommunity -> showCourseCommunity = true
+                HiveLink.PortalServices -> servicesFullscreen = true
+                else -> Unit
+            }
+        }
+        HiveLinkBus.register(listener)
+        onDispose { HiveLinkBus.unregister(listener) }
+    }
     LaunchedEffect(tabs) {
         // 开关「办事」会改变页签数量：重置可能残留的全屏标志，
         // 并在当前页签被移除时立即切走，避免以禁用状态渲染办事页一帧。
@@ -504,10 +552,28 @@ private fun HiveShell(
             modifier = Modifier.size(1.dp).alpha(0.01f),
         )
         if (showShuiyuan) {
-            ShuiyuanScreen(context = context, onClose = { showShuiyuan = false })
+            ShuiyuanScreen(
+                context = context,
+                onClose = {
+                    showShuiyuan = false
+                    linkTopicId = null
+                    linkUsername = null
+                    linkCategory = null
+                },
+                initialTopicId = linkTopicId,
+                initialUsername = linkUsername,
+                initialCategory = linkCategory,
+            )
         }
         if (showCanvas) {
-            CanvasScreen(context = context, onClose = { showCanvas = false })
+            CanvasScreen(
+                context = context,
+                onClose = {
+                    showCanvas = false
+                    linkCanvasCourse = null
+                },
+                initialCourseId = linkCanvasCourse,
+            )
         }
         if (showClassroom) {
             ClassroomScreen(context = context, onClose = { showClassroom = false })

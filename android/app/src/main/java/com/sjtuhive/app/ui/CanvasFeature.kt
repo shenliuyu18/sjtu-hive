@@ -96,7 +96,11 @@ private fun openLink(context: Context, url: String) {
 }
 
 @Composable
-fun CanvasScreen(context: Context, onClose: () -> Unit) {
+fun CanvasScreen(
+    context: Context,
+    onClose: () -> Unit,
+    initialCourseId: Long? = null,
+) {
     val api = remember { CanvasApi(context) }
     var configured by remember { mutableStateOf(api.usable()) }
     var tokenInput by remember { mutableStateOf("") }
@@ -114,6 +118,13 @@ fun CanvasScreen(context: Context, onClose: () -> Unit) {
     var reading by remember { mutableStateOf<CanvasDoc?>(null) }
     var opening by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+
+    // 深链：链接指向某门 Canvas 课程时，列表就绪后直接进入该课程
+    LaunchedEffect(initialCourseId, courses) {
+        val target = initialCourseId ?: return@LaunchedEffect
+        if (course != null) return@LaunchedEffect
+        courses.firstOrNull { it.id == target }?.let { course = it }
+    }
 
     LaunchedEffect(configured, course?.id, section, reload) {
         if (!configured) return@LaunchedEffect

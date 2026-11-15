@@ -64,7 +64,13 @@ import com.sjtuhive.app.data.ShuiyuanTopicDetail
 import kotlinx.coroutines.launch
 
 @Composable
-fun ShuiyuanScreen(context: Context, onClose: () -> Unit) {
+fun ShuiyuanScreen(
+    context: Context,
+    onClose: () -> Unit,
+    initialTopicId: Long? = null,
+    initialUsername: String? = null,
+    initialCategory: String? = null,
+) {
     val api = remember { ShuiyuanApi(context) }
     val scope = rememberCoroutineScope()
     var connected by remember { mutableStateOf(api.isConnected()) }
@@ -76,8 +82,8 @@ fun ShuiyuanScreen(context: Context, onClose: () -> Unit) {
     var page by remember { mutableIntStateOf(0) }
     var hasMore by remember { mutableStateOf(false) }
     var reload by remember { mutableIntStateOf(0) }
-    var openTopic by remember { mutableLongStateOf(0L) }
-    var profileName by remember { mutableStateOf<String?>(null) }
+    var openTopic by remember { mutableLongStateOf(initialTopicId ?: 0L) }
+    var profileName by remember { mutableStateOf(initialUsername) }
     var composing by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
 
@@ -249,6 +255,7 @@ fun ShuiyuanScreen(context: Context, onClose: () -> Unit) {
                 topicId = openTopic,
                 onBack = { openTopic = 0L },
                 onOpenProfile = { profileName = it },
+                onOpenTopic = { topicId -> openTopic = topicId },
             )
         }
 
@@ -315,6 +322,7 @@ private fun ShuiyuanTopicScreen(
     topicId: Long,
     onBack: () -> Unit,
     onOpenProfile: (String) -> Unit,
+    onOpenTopic: (Long) -> Unit,
 ) {
     val api = remember { ShuiyuanApi(context) }
     val scope = rememberCoroutineScope()
@@ -431,6 +439,7 @@ private fun ShuiyuanTopicScreen(
                     detail = detail!!,
                     isDark = LocalIsDark.current,
                     onOpenProfile = onOpenProfile,
+                    onOpenTopic = onOpenTopic,
                     onLoadMore = { loadMorePosts() },
                     onReady = { webView = it },
                 )
@@ -484,6 +493,7 @@ private fun TopicHtmlView(
     detail: ShuiyuanTopicDetail,
     isDark: Boolean,
     onOpenProfile: (String) -> Unit,
+    onOpenTopic: (Long) -> Unit,
     onLoadMore: () -> Unit,
     onReady: (WebView) -> Unit,
 ) {
@@ -507,16 +517,21 @@ private fun TopicHtmlView(
                 webViewClient = object : WebViewClient() {
                     override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean {
                         val target = url ?: return false
-                        val uri = runCatching { java.net.URI(target) }.getOrNull()
-                        if (uri?.host == "shuiyuan.sjtu.edu.cn") {
-                            val segments = uri.path.orEmpty().split('/').filter { it.isNotEmpty() }
-                            if (segments.size >= 2 && segments[0] == "u") {
-                                val username = runCatching {
-                                    java.net.URLDecoder.decode(segments[1], "UTF-8")
-                                }.getOrDefault(segments[1])
-                                onOpenProfile(username)
+                        // 帖子正文里的链接：水源同源链接在模块内直接切换，
+                        // 其他校园站点交给统一路由进对应模块，外部链接才走浏览器。
+                        when (val link = HiveLinkRouter.resolve(target)) {
+                            is HiveLink.ShuiyuanTopic -> {
+                                onOpenTopic(link.id)
                                 return true
                             }
+                            is HiveLink.ShuiyuanUser -> {
+                                onOpenProfile(link.username)
+                                return true
+                            }
+                            is HiveLink.ShuiyuanCategory, is HiveLink.ShuiyuanSearch, HiveLink.Ignore -> {
+                                return true
+                            }
+                            else -> return HiveLinkRouter.open(context, target)
                         }
                         if (target.startsWith(ShuiyuanApi.ORIGIN)) return false
                         runCatching {

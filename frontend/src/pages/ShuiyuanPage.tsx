@@ -38,6 +38,7 @@ import type {
 } from '@/lib/models';
 import { formatDate, relativeTime } from '@/lib/format';
 import { cn } from '@/lib/cn';
+import { openIntent, resolveLink } from '@/lib/links';
 import { useApp } from '@/stores/app';
 import { Button } from '@/components/ui/Button';
 import { Input, Textarea } from '@/components/ui/Input';
@@ -77,6 +78,7 @@ function categoryColor(color: string | null | undefined) {  if (!color) return '
 }
 
 function PostBody({ html }: { html: string }) {
+  const navigate = useApp((state) => state.navigate);
   const clean = useMemo(
     () =>
       DOMPurify.sanitize(html, {
@@ -96,12 +98,7 @@ function PostBody({ html }: { html: string }) {
         const href = anchor.getAttribute('href');
         if (!href || href.startsWith('#')) return;
         event.preventDefault();
-        try {
-          const url = new URL(href, origin);
-          if (url.protocol === 'http:' || url.protocol === 'https:') void call('app.openExternal', url.href);
-        } catch {
-          // ignore
-        }
+        openIntent(resolveLink(href, origin), navigate, (url) => void call('app.openExternal', url));
       }}
       dangerouslySetInnerHTML={{ __html: clean }}
     />
@@ -262,6 +259,12 @@ export function ShuiyuanPage() {
     const username = params.shuiyuanUsername;
     if (typeof username === 'string' && username) void openProfile(username);
   }, [params.shuiyuanUsername]);
+
+  // 深链：链接指向某个水源帖子时直接打开该帖
+  useEffect(() => {
+    const topicId = params.shuiyuanTopicId;
+    if (typeof topicId === 'number' && topicId > 0) void loadTopic(topicId);
+  }, [params.shuiyuanTopicId]);
 
   const startAuth = async () => {
     setStartingAuth(true);
