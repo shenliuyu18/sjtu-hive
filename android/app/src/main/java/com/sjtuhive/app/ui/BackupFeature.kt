@@ -8,8 +8,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
@@ -88,27 +86,6 @@ fun BackupPage(context: android.content.Context, modifier: Modifier = Modifier) 
         }
     }
 
-    val exportEncryptedLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.CreateDocument("application/octet-stream"),
-    ) { uri ->
-        if (uri == null) return@rememberLauncherForActivityResult
-        val pass = passphrase
-        scope.launch {
-            working = true
-            val result = runCatching {
-                withContext(Dispatchers.IO) {
-                    val bytes = BackupApi.pack(context, pass)
-                    context.contentResolver.openOutputStream(uri)?.use { it.write(bytes) }
-                        ?: error("无法写入所选文件")
-                    bytes.size
-                }
-            }
-            message = result.fold({ "已导出加密备份（${it / 1024} KB）" }, { "导出失败：${it.message}" })
-            working = false
-            passphrase = ""
-        }
-    }
-
     val importLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument(),
     ) { uri ->
@@ -133,16 +110,15 @@ fun BackupPage(context: android.content.Context, modifier: Modifier = Modifier) 
     }
 
     Column(
-        modifier
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 20.dp, vertical = 8.dp),
+        modifier.padding(horizontal = 20.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         message?.let {
             Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
         }
         Text(
-            "备份包含：账号与主题设置、待办、页面缓存、邮箱凭据（受口令保护）。" +
+            "备份包含：账号与主题设置、待办、页面缓存、邮箱凭据。" +
+                "加密备份用口令保护；未加密的备份里邮箱密码是明文，请只放在自己可信的位置。" +
                 "与桌面端的备份不通用。",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -199,12 +175,17 @@ fun BackupPage(context: android.content.Context, modifier: Modifier = Modifier) 
             modifier = Modifier.fillMaxWidth(),
         )
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(enabled = !working && url.isNotBlank(), onClick = {
-                webdav.save(WebDavClient.Config(url, user, password, dir))
-                message = "WebDAV 配置已保存"
-            }) { Text("保存配置") }
             Button(
                 enabled = !working && url.isNotBlank(),
+                modifier = Modifier.weight(1f),
+                onClick = {
+                    webdav.save(WebDavClient.Config(url, user, password, dir))
+                    message = "WebDAV 配置已保存"
+                },
+            ) { Text("保存配置") }
+            Button(
+                enabled = !working && url.isNotBlank(),
+                modifier = Modifier.weight(1f),
                 onClick = {
                     webdav.save(WebDavClient.Config(url, user, password, dir))
                     val config = webdav.config() ?: return@Button
@@ -222,11 +203,12 @@ fun BackupPage(context: android.content.Context, modifier: Modifier = Modifier) 
                     }
                 },
             ) { Text("测试并列出") }
-            Button(
-                enabled = !working && url.isNotBlank(),
-                onClick = { passphraseFor = "upload" },
-            ) { Text("上传备份") }
         }
+        Button(
+            enabled = !working && url.isNotBlank(),
+            modifier = Modifier.fillMaxWidth(),
+            onClick = { passphraseFor = "upload" },
+        ) { Text("上传备份到 WebDAV") }
         remoteFiles.forEach { name ->
             Row(
                 Modifier.fillMaxWidth(),
@@ -276,7 +258,27 @@ fun BackupPage(context: android.content.Context, modifier: Modifier = Modifier) 
                         when (mode) {
                             "export" -> {
                                 passphraseFor = null
-                                exportEncryptedLauncher.launch("SJTU-Hive-backup-$stamp.hivebackup")
+                                val pass = passphrase
+                                scope.launch {
+                                    working = true
+                                    val result = runCatching {
+                                        withContext(Dispatchers.IO) {
+                                            val bytes = BackupApi.pack(context, pass)
+                                            val temp = java.io.File(context.cacheDir, "backup-$stamp.hivebackup")
+                                            temp.writeBytes(bytes)
+                                            val name = "SJTU-Hive-backup-$stamp.hivebackup"
+                                            saveToDownloads(context, temp, name)
+                                            temp.delete()
+                                            bytes.size
+                                        }
+                                    }
+                                    message = result.fold(
+                                        { "加密备份已保存到下载目录（${it / 1024} KB）" },
+                                        { "导出失败：${it.message}" },
+                                    )
+                                    working = false
+                                    passphrase = ""
+                                }
                             }
                             "upload" -> {
                                 passphraseFor = null
