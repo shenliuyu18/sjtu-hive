@@ -6,7 +6,7 @@ import { findSlideVideos, type SlideVideo } from './pptxVideo';
 
 const BASE_WIDTH = 1120;
 
-export function PptxPreview({ url }: { url: string }) {
+export function PptxPreview({ url, zoom = 1 }: { url: string; zoom?: number }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const zipRef = useRef<{ url: string; zip: JSZip } | null>(null);
   const videosRef = useRef<SlideVideo[]>([]);
@@ -14,7 +14,7 @@ export function PptxPreview({ url }: { url: string }) {
   const playingURLRef = useRef<string | null>(null);
   const aliveRef = useRef(true);
   const videoTokenRef = useRef(0);
-  const [zoom, setZoom] = useState(1);
+  const [fitScale, setFitScale] = useState(1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [playing, setPlaying] = useState<{ url: string; name: string } | null>(null);
@@ -62,7 +62,7 @@ export function PptxPreview({ url }: { url: string }) {
       if (frame) cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
         const available = host.parentElement?.clientWidth ?? host.clientWidth;
-        setZoom(Math.min(1, available / (BASE_WIDTH + 32)));
+        setFitScale(Math.min(1, available / (BASE_WIDTH + 32)));
       });
     };
     measure();
@@ -165,7 +165,7 @@ export function PptxPreview({ url }: { url: string }) {
           {error}
         </div>
       ) : null}
-      <div ref={hostRef} className="pptx-preview-host mx-auto" style={{ width: BASE_WIDTH, zoom }} />
+      <div ref={hostRef} className="pptx-preview-host mx-auto" style={{ width: BASE_WIDTH, zoom: fitScale * zoom }} />
       {playing ? (
         <div className="fixed inset-0 z-[90] flex flex-col bg-black">
           <div className="flex shrink-0 items-center justify-between gap-3 border-b border-white/10 px-4 py-2 text-xs text-white/80">

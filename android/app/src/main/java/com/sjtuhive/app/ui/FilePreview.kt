@@ -26,15 +26,19 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -81,6 +85,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.FileProvider
 import androidx.core.view.WindowCompat
@@ -153,6 +158,9 @@ private fun FilePreviewScreen(request: PreviewRequest) {
     var downloading by remember { mutableStateOf(false) }
     val kind = remember(request.fileName) { kindOf(request.fileName) }
     val scope = rememberCoroutineScope()
+    var zoom by remember(request) { mutableFloatStateOf(1f) }
+    val zoomable = kind == PreviewKind.PDF || kind == PreviewKind.PPTX ||
+        kind == PreviewKind.DOCX || kind == PreviewKind.XLSX || kind == PreviewKind.TEXT
 
     BackHandler {
         if (fullscreen) fullscreen = false else PreviewHost.close()
@@ -448,13 +456,13 @@ private fun FilePreviewScreen(request: PreviewRequest) {
                         Button(onClick = { reloadTick++ }) { Text("重试") }
                     }
                     file != null -> when (kind) {
-                        PreviewKind.PDF -> PdfPreview(file!!)
+                        PreviewKind.PDF -> PdfPreview(file!!, zoom)
                         PreviewKind.IMAGE -> ZoomableImage(file!!)
-                        PreviewKind.TEXT -> TextPreview(file!!)
+                        PreviewKind.TEXT -> TextPreview(file!!, zoom)
                         PreviewKind.AUDIO -> AudioPreview(file!!, request.title)
                         PreviewKind.VIDEO -> VideoPreview(file!!)
-                        PreviewKind.DOCX, PreviewKind.XLSX -> OfficePreview(file!!, request.fileName)
-                        PreviewKind.PPTX -> PptxSlidesPreview(file!!)
+                        PreviewKind.DOCX, PreviewKind.XLSX -> OfficePreview(file!!, request.fileName, zoom)
+                        PreviewKind.PPTX -> PptxSlidesPreview(file!!, zoom)
                         PreviewKind.DOC -> LegacyOfficePreview(file!!, "doc")
                         PreviewKind.PPT -> LegacyOfficePreview(file!!, "ppt")
                         PreviewKind.XLS_LEGACY -> LegacyOfficePreview(file!!, "xls")
@@ -497,6 +505,16 @@ private fun FilePreviewScreen(request: PreviewRequest) {
             }
         }
 
+        if (zoomable && file != null && !loading && error == null) {
+            PreviewZoomBar(
+                zoom = zoom,
+                onZoom = { zoom = it.coerceIn(1f, 3f) },
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 16.dp),
+            )
+        }
+
         if (fullscreen) {
             Row(
                 Modifier
@@ -511,6 +529,27 @@ private fun FilePreviewScreen(request: PreviewRequest) {
                 TextButton(onClick = { PreviewHost.close() }) { Text("关闭", color = Color.White) }
             }
         }
+    }
+}
+
+@Composable
+private fun PreviewZoomBar(zoom: Float, onZoom: (Float) -> Unit, modifier: Modifier = Modifier) {
+    Row(
+        modifier
+            .clip(RoundedCornerShape(24.dp))
+            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.94f))
+            .padding(horizontal = 6.dp, vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        TextButton(onClick = { onZoom(zoom - 0.25f) }, enabled = zoom > 1f) { Text("−") }
+        Text(
+            "${(zoom * 100).toInt()}%",
+            modifier = Modifier.widthIn(min = 52.dp),
+            textAlign = TextAlign.Center,
+            style = MaterialTheme.typography.labelMedium,
+        )
+        TextButton(onClick = { onZoom(zoom + 0.25f) }, enabled = zoom < 3f) { Text("+") }
+        TextButton(onClick = { onZoom(1f) }) { Text("适应") }
     }
 }
 
@@ -560,75 +599,58 @@ private fun ZoomableImage(file: File) {
 }
 
 @Composable
-private fun PdfPreview(file: File) {
-    var pages by remember(file) { mutableStateOf<List<Bitmap>>(emptyList()) }
+private fun PdfPreview(file: File, zoom: Float) {
+    var pageCount by remember(file) { mutableIntStateOf(-1) }
     var truncated by remember(file) { mutableStateOf(false) }
-    var rendering by remember(file) { mutableStateOf(true) }
     var error by remember(file) { mutableStateOf<String?>(null) }
     val density = LocalDensity.current
 
-    BoxWithConstraints(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-        val targetWidth = with(density) { minOf(maxWidth.toPx(), 1440f) }.toInt()
-        LaunchedEffect(file, targetWidth) {
-            if (targetWidth <= 0) return@LaunchedEffect
-            rendering = true
-            error = null
-            val result = withContext(Dispatchers.IO) {
-                runCatching {
-                    ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor ->
-                        PdfRenderer(descriptor).use { renderer ->
-                            val count = minOf(renderer.pageCount, 60)
-                            val bitmaps = ArrayList<Bitmap>(count)
-                            for (index in 0 until count) {
-                                renderer.openPage(index).use { page ->
-                                    val ratio = page.height.toFloat() / page.width.toFloat()
-                                    val width = targetWidth
-                                    val height = (width * ratio).toInt().coerceAtLeast(1)
-                                    val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-                                    bitmap.eraseColor(AndroidColor.WHITE)
-                                    page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-                                    bitmaps += bitmap
-                                }
-                            }
-                            bitmaps to (renderer.pageCount > count)
-                        }
+    LaunchedEffect(file) {
+        error = null
+        val result = withContext(Dispatchers.IO) {
+            runCatching {
+                ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor ->
+                    PdfRenderer(descriptor).use { renderer ->
+                        renderer.pageCount to (renderer.pageCount > 60)
                     }
                 }
             }
-            result.onSuccess {
-                pages = it.first
-                truncated = it.second
-            }.onFailure { error = it.message ?: "PDF 渲染失败" }
-            rendering = false
         }
+        result.onSuccess {
+            pageCount = minOf(it.first, 60)
+            truncated = it.second
+        }.onFailure { error = it.message ?: "PDF 渲染失败" }
+    }
 
+    BoxWithConstraints(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         when {
-            rendering -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            error != null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text(error ?: "", color = MaterialTheme.colorScheme.error)
+            }
+            pageCount < 0 -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     CircularProgressIndicator()
                     Text("正在渲染 PDF…", modifier = Modifier.padding(top = 12.dp))
                 }
             }
-            error != null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text(error ?: "", color = MaterialTheme.colorScheme.error)
-            }
-            else -> LazyColumn {
-                itemsIndexed(pages) { index, bitmap ->
-                    Image(
-                        bitmap = bitmap.asImageBitmap(),
-                        contentDescription = "第 ${index + 1} 页",
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 8.dp, vertical = 4.dp),
-                    )
-                }
-                if (truncated) {
-                    item {
-                        Text(
-                            "仅显示前 60 页。",
-                            modifier = Modifier.padding(16.dp),
-                            style = MaterialTheme.typography.labelSmall,
-                        )
+            else -> {
+                val pageWidth = maxWidth * zoom
+                val targetWidth = with(density) { pageWidth.toPx() }.toInt().coerceIn(480, 2200)
+                val horizontal = rememberScrollState()
+                Box(Modifier.fillMaxSize().horizontalScroll(horizontal)) {
+                    LazyColumn(Modifier.width(pageWidth).fillMaxHeight()) {
+                        items(pageCount) { index ->
+                            PdfPage(file = file, index = index, targetWidth = targetWidth)
+                        }
+                        if (truncated) {
+                            item {
+                                Text(
+                                    "仅显示前 60 页。",
+                                    modifier = Modifier.padding(16.dp),
+                                    style = MaterialTheme.typography.labelSmall,
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -637,7 +659,51 @@ private fun PdfPreview(file: File) {
 }
 
 @Composable
-private fun PptxSlidesPreview(file: File) {
+private fun PdfPage(file: File, index: Int, targetWidth: Int) {
+    var rendered by remember(file, index, targetWidth) { mutableStateOf<RenderedPdfPage?>(null) }
+    LaunchedEffect(file, index, targetWidth) {
+        rendered = withContext(Dispatchers.IO) {
+            runCatching {
+                ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor ->
+                    PdfRenderer(descriptor).use { renderer ->
+                        renderer.openPage(index).use { page ->
+                            val ratio = page.height.toFloat() / page.width.toFloat()
+                            val height = (targetWidth * ratio).toInt().coerceAtLeast(1)
+                            val bitmap = Bitmap.createBitmap(targetWidth, height, Bitmap.Config.ARGB_8888)
+                            bitmap.eraseColor(AndroidColor.WHITE)
+                            page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                            RenderedPdfPage(bitmap, ratio)
+                        }
+                    }
+                }
+            }.getOrNull()
+        }
+    }
+    val page = rendered
+    if (page != null) {
+        Image(
+            bitmap = page.bitmap.asImageBitmap(),
+            contentDescription = "第 ${index + 1} 页",
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 4.dp),
+        )
+    } else {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .aspectRatio(1f / 1.414f)
+                .padding(horizontal = 8.dp, vertical = 4.dp)
+                .background(MaterialTheme.colorScheme.surfaceVariant),
+            contentAlignment = Alignment.Center,
+        ) { CircularProgressIndicator() }
+    }
+}
+
+private data class RenderedPdfPage(val bitmap: Bitmap, val ratio: Float)
+
+@Composable
+private fun PptxSlidesPreview(file: File, zoom: Float) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val document = remember(file, context) { runCatching { PptxDocument(file, context.cacheDir) }.getOrNull() }
@@ -656,27 +722,31 @@ private fun PptxSlidesPreview(file: File) {
     Box(Modifier.fillMaxSize().background(Color(0xFF111317))) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
             val density = LocalDensity.current
-            val targetWidth = with(density) { minOf(maxWidth.toPx(), 1440f) }.toInt()
-            LazyColumn {
-                items(document.slideCount) { index ->
-                    PptxSlidePage(
-                        document = document,
-                        index = index,
-                        targetWidth = targetWidth,
-                        videoPart = document.videoOf(index),
-                        onPlay = { part ->
-                            if (!preparing) {
-                                preparing = true
-                                scope.launch {
-                                    val video = downloadWithRetry {
-                                        runCatching { document.videoFile(part) }.getOrNull()
+            val pageWidth = maxWidth * zoom
+            val targetWidth = with(density) { pageWidth.toPx() }.toInt().coerceIn(480, 2200)
+            val horizontal = rememberScrollState()
+            Box(Modifier.fillMaxSize().horizontalScroll(horizontal)) {
+                LazyColumn(Modifier.width(pageWidth).fillMaxHeight()) {
+                    items(document.slideCount) { index ->
+                        PptxSlidePage(
+                            document = document,
+                            index = index,
+                            targetWidth = targetWidth,
+                            videoPart = document.videoOf(index),
+                            onPlay = { part ->
+                                if (!preparing) {
+                                    preparing = true
+                                    scope.launch {
+                                        val video = downloadWithRetry {
+                                            runCatching { document.videoFile(part) }.getOrNull()
+                                        }
+                                        if (video != null) playing = video
+                                        preparing = false
                                     }
-                                    if (video != null) playing = video
-                                    preparing = false
                                 }
-                            }
-                        },
-                    )
+                            },
+                        )
+                    }
                 }
             }
         }
@@ -751,8 +821,9 @@ private fun PptxSlidePage(
 }
 
 @Composable
-private fun TextPreview(file: File) {
+private fun TextPreview(file: File, zoom: Float) {
     val text = remember(file) { rememberText(file) }
+    val base = MaterialTheme.typography.bodySmall
     SelectionContainer {
         Text(
             text,
@@ -760,7 +831,10 @@ private fun TextPreview(file: File) {
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
                 .padding(16.dp),
-            style = MaterialTheme.typography.bodySmall,
+            style = base.copy(
+                fontSize = (base.fontSize.value * zoom).sp,
+                lineHeight = (base.lineHeight.value * zoom).sp,
+            ),
             fontFamily = FontFamily.Monospace,
         )
     }
@@ -963,7 +1037,7 @@ private fun LegacyOfficePreview(file: File, kind: String) {
 }
 
 @Composable
-private fun OfficePreview(file: File, fileName: String) {
+private fun OfficePreview(file: File, fileName: String, zoom: Float) {
     var text by remember(file) { mutableStateOf<String?>(null) }
     var error by remember(file) { mutableStateOf<String?>(null) }
     var loading by remember(file) { mutableStateOf(true) }
@@ -989,13 +1063,17 @@ private fun OfficePreview(file: File, fileName: String) {
             Text(error ?: "", color = MaterialTheme.colorScheme.error)
         }
         else -> SelectionContainer {
+            val base = MaterialTheme.typography.bodyMedium
             Text(
                 text.orEmpty(),
                 modifier = Modifier
                     .fillMaxSize()
                     .verticalScroll(rememberScrollState())
                     .padding(16.dp),
-                style = MaterialTheme.typography.bodyMedium,
+                style = base.copy(
+                    fontSize = (base.fontSize.value * zoom).sp,
+                    lineHeight = (base.lineHeight.value * zoom).sp,
+                ),
             )
         }
     }

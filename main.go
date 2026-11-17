@@ -47,7 +47,9 @@ func main() {
 		Windows: &windows.Options{
 			WebviewUserDataPath:  paths.WebViewDir,
 			Theme:                windows.SystemDefault,
+			ZoomFactor:           1,
 			IsZoomControlEnabled: false,
+			DisablePinchZoom:     true,
 		},
 		Debug: options.Debug{OpenInspectorOnStartup: false},
 	})

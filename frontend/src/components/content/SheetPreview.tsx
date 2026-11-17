@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Spinner } from '@/components/ui/Misc';
 import { cn } from '@/lib/cn';
 
-export function SheetPreview({ url }: { url: string }) {
+export function SheetPreview({ url, zoom = 1 }: { url: string; zoom?: number }) {
   const [workbook, setWorkbook] = useState<XLSX.WorkBook | null>(null);
   const [sheet, setSheet] = useState('');
   const [loading, setLoading] = useState(true);
@@ -77,6 +77,7 @@ export function SheetPreview({ url }: { url: string }) {
         </div>
       ) : null}
       <div className="scroll-thin min-h-0 flex-1 overflow-auto bg-surface p-3">
+        <div style={{ zoom }}>
         <table className="w-full border-collapse text-[0.72rem]">
           <tbody>
             {rows.map((row, rowIndex) => (
@@ -97,6 +98,7 @@ export function SheetPreview({ url }: { url: string }) {
         {rows.length >= 200 ? (
           <div className="mt-2 text-[0.66rem] text-ink-3">只显示前 200 行 × 40 列；完整内容请下载后用 WPS/Excel 打开。</div>
         ) : null}
+        </div>
       </div>
     </div>
   );

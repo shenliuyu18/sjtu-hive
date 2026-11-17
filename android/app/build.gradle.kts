@@ -19,7 +19,7 @@ android {
         minSdk = 33
         targetSdk = 37
         versionCode = 10303
-        versionName = "1.3.3-beta.1"
+        versionName = "1.3.3-beta.2"
     }
 
     buildFeatures { compose = true }

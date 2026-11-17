@@ -8,7 +8,7 @@ function viewerRuntime(): Promise<PptViewerRuntime> {
   return runtimePromise;
 }
 
-export function LegacyPptPreview({ url }: { url: string }) {
+export function LegacyPptPreview({ url, zoom = 1 }: { url: string; zoom?: number }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const mountedRef = useRef<MountedPptViewer | null>(null);
   const bufferRef = useRef<{ url: string; data: ArrayBuffer } | null>(null);
@@ -93,7 +93,7 @@ export function LegacyPptPreview({ url }: { url: string }) {
           {error}
         </div>
       ) : null}
-      <div ref={hostRef} className="legacy-ppt-host mx-auto" />
+      <div ref={hostRef} className="legacy-ppt-host mx-auto" style={{ zoom }} />
     </div>
   );
 }

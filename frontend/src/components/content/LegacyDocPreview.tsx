@@ -2,7 +2,7 @@ import { mountMsDoc, parseMsDocToHtml } from '@file-viewer/doc';
 import { useEffect, useRef, useState } from 'react';
 import { Spinner } from '@/components/ui/Misc';
 
-export function LegacyDocPreview({ url }: { url: string }) {
+export function LegacyDocPreview({ url, zoom = 1 }: { url: string; zoom?: number }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -51,6 +51,7 @@ export function LegacyDocPreview({ url }: { url: string }) {
       <div
         ref={hostRef}
         className="msdoc-preview-host mx-auto w-full max-w-[54rem] bg-white shadow-[var(--shadow-card)]"
+        style={{ zoom }}
       />
     </div>
   );

@@ -41,10 +41,12 @@ export function HtmlFrame({
   html,
   title,
   className,
+  zoom = 1,
 }: {
   html: string;
   title?: string;
   className?: string;
+  zoom?: number;
 }) {
   const frameRef = useRef<HTMLIFrameElement>(null);
   const theme = useSettings((state) => state.state.theme);
@@ -90,7 +92,7 @@ export function HtmlFrame({
       referrerPolicy="no-referrer"
       srcDoc={documentHtml}
       className={className}
-      style={{ width: '100%', height: '100%', border: 0, display: 'block', background: 'transparent' }}
+      style={{ width: '100%', height: '100%', border: 0, display: 'block', background: 'transparent', zoom }}
     />
   );
 }

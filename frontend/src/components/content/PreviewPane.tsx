@@ -8,10 +8,12 @@ import {
   Link2,
   Maximize2,
   Minimize2,
+  Minus,
   Music,
+  Plus,
   Video,
 } from 'lucide-react';
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import type { DocumentContent } from '@/lib/models';
 import { formatBytes, formatDate } from '@/lib/format';
 import { call } from '@/lib/bridge';
@@ -44,6 +46,70 @@ function formatLabel(format: string) {
     binary: '二进制文件',
   };
   return labels[format] ?? format.toUpperCase();
+}
+
+const ZOOM_FORMATS = new Set(['html', 'markdown', 'pdf', 'image', 'docx', 'xlsx', 'pptx', 'doc', 'ppt', 'text']);
+const ZOOM_MIN = 0.5;
+const ZOOM_MAX = 4;
+
+function clampZoom(value: number) {
+  return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round(value * 100) / 100));
+}
+
+function ImagePreview({
+  url,
+  title,
+  zoom,
+  onZoom,
+}: {
+  url: string;
+  title: string;
+  zoom: number;
+  onZoom: (value: number) => void;
+}) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const drag = useRef<{ x: number; y: number; left: number; top: number } | null>(null);
+  const stopDrag = () => {
+    drag.current = null;
+  };
+  const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (zoom <= 1) return;
+    const host = scrollRef.current;
+    if (!host) return;
+    drag.current = { x: event.clientX, y: event.clientY, left: host.scrollLeft, top: host.scrollTop };
+    host.setPointerCapture(event.pointerId);
+  };
+  const onPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const host = scrollRef.current;
+    const start = drag.current;
+    if (!host || !start) return;
+    host.scrollLeft = start.left - (event.clientX - start.x);
+    host.scrollTop = start.top - (event.clientY - start.y);
+  };
+  return (
+    <div
+      ref={scrollRef}
+      className={cn(
+        'scroll-thin h-full overflow-auto bg-surface-3',
+        zoom > 1 && 'cursor-grab active:cursor-grabbing',
+      )}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={stopDrag}
+      onPointerCancel={stopDrag}
+      onDoubleClick={() => onZoom(zoom > 1 ? 1 : 2)}
+      title="双击切换 100% / 200%，放大后可拖动"
+    >
+      <div className="flex min-h-full min-w-full items-center justify-center p-4" style={{ zoom }}>
+        <img
+          src={url}
+          alt={title}
+          draggable={false}
+          className="max-h-full max-w-full rounded-lg object-contain shadow-[var(--shadow-card)]"
+        />
+      </div>
+    </div>
+  );
 }
 
 function MetaBar({ doc }: { doc: DocumentContent }) {
@@ -92,6 +158,50 @@ export function PreviewPane({
     return () => window.removeEventListener('keydown', onKey);
   }, [fullscreen]);
 
+  const [zoom, setZoom] = useState(1);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const zoomable = !!doc && ZOOM_FORMATS.has(doc.format);
+
+  useEffect(() => {
+    setZoom(1);
+  }, [doc?.format, doc?.resourceUrl, doc?.title]);
+
+  useEffect(() => {
+    if (!zoomable || loading || error) return;
+    const host = bodyRef.current;
+    if (!host) return;
+    const onWheel = (event: WheelEvent) => {
+      if (!event.ctrlKey) return;
+      event.preventDefault();
+      setZoom((value) => clampZoom(value - event.deltaY * 0.002));
+    };
+    host.addEventListener('wheel', onWheel, { passive: false });
+    return () => host.removeEventListener('wheel', onWheel);
+  }, [zoomable, loading, error, doc]);
+
+  useEffect(() => {
+    if (!zoomable) return;
+    const onKey = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA' || target?.isContentEditable) {
+        return;
+      }
+      if (!(event.ctrlKey || event.metaKey)) return;
+      if (event.key === '=' || event.key === '+') {
+        event.preventDefault();
+        setZoom((value) => clampZoom(value + 0.25));
+      } else if (event.key === '-') {
+        event.preventDefault();
+        setZoom((value) => clampZoom(value - 0.25));
+      } else if (event.key === '0') {
+        event.preventDefault();
+        setZoom(1);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [zoomable]);
+
   if (loading) {
     return (
       <div className="flex h-full items-center justify-center gap-2 text-xs text-ink-3">
@@ -124,43 +234,49 @@ export function PreviewPane({
   const body = () => {
     switch (doc.format) {
       case 'html':
-        return <HtmlFrame html={doc.text ?? ''} title={doc.title} />;
+        return (
+          <div className="scroll-thin h-full overflow-auto">
+            <HtmlFrame html={doc.text ?? ''} title={doc.title} zoom={zoom} />
+          </div>
+        );
       case 'markdown':
         return (
-          <div className="scroll-thin h-full overflow-y-auto p-6">
-            <MarkdownView text={doc.text ?? ''} assetBase={doc.assetBase} />
+          <div className="scroll-thin h-full overflow-y-auto">
+            <div className="p-6" style={{ zoom }}>
+              <MarkdownView text={doc.text ?? ''} assetBase={doc.assetBase} />
+            </div>
           </div>
         );
       case 'pdf':
         return doc.resourceUrl ? (
-          <iframe title={doc.title} src={doc.resourceUrl} className="h-full w-full border-0 bg-surface-3" />
+          <div className="scroll-thin h-full overflow-auto bg-surface-3">
+            <iframe
+              title={doc.title}
+              src={doc.resourceUrl}
+              style={{ width: '100%', height: '100%', border: 0, zoom }}
+            />
+          </div>
         ) : (
           <div className="p-6 text-xs text-ink-3">没有可用的 PDF 地址</div>
         );
       case 'image':
-        return (
-          <div className="flex h-full items-center justify-center overflow-auto bg-surface-3 p-4">
-            {doc.resourceUrl ? (
-              <img
-                src={doc.resourceUrl}
-                alt={doc.title}
-                className="max-h-full max-w-full rounded-lg object-contain shadow-[var(--shadow-card)]"
-              />
-            ) : (
-              <ImageIcon className="size-8 text-ink-3" />
-            )}
+        return doc.resourceUrl ? (
+          <ImagePreview url={doc.resourceUrl} title={doc.title} zoom={zoom} onZoom={(value) => setZoom(clampZoom(value))} />
+        ) : (
+          <div className="flex h-full items-center justify-center p-4">
+            <ImageIcon className="size-8 text-ink-3" />
           </div>
         );
       case 'docx':
-        return doc.resourceUrl ? <DocxPreview url={doc.resourceUrl} /> : null;
+        return doc.resourceUrl ? <DocxPreview url={doc.resourceUrl} zoom={zoom} /> : null;
       case 'xlsx':
-        return doc.resourceUrl ? <SheetPreview url={doc.resourceUrl} /> : null;
+        return doc.resourceUrl ? <SheetPreview url={doc.resourceUrl} zoom={zoom} /> : null;
       case 'pptx':
-        return doc.resourceUrl ? <PptxPreview url={doc.resourceUrl} /> : null;
+        return doc.resourceUrl ? <PptxPreview url={doc.resourceUrl} zoom={zoom} /> : null;
       case 'doc':
-        return doc.resourceUrl ? <LegacyDocPreview url={doc.resourceUrl} /> : null;
+        return doc.resourceUrl ? <LegacyDocPreview url={doc.resourceUrl} zoom={zoom} /> : null;
       case 'ppt':
-        return doc.resourceUrl ? <LegacyPptPreview url={doc.resourceUrl} /> : null;
+        return doc.resourceUrl ? <LegacyPptPreview url={doc.resourceUrl} zoom={zoom} /> : null;
       case 'video':
         return (
           <div className="flex h-full items-center justify-center bg-black/90 p-4">
@@ -180,9 +296,14 @@ export function PreviewPane({
         );
       case 'text':
         return (
-          <pre className="scroll-thin selectable h-full overflow-auto whitespace-pre-wrap break-words p-6 font-mono text-[0.78rem] leading-relaxed text-ink-2">
-            {doc.text ?? ''}
-          </pre>
+          <div className="scroll-thin h-full overflow-auto">
+            <pre
+              className="selectable whitespace-pre-wrap break-words p-6 font-mono text-[0.78rem] leading-relaxed text-ink-2"
+              style={{ zoom }}
+            >
+              {doc.text ?? ''}
+            </pre>
+          </div>
         );
       case 'link':
         return (
@@ -260,7 +381,48 @@ export function PreviewPane({
         </div>
       </div>
       <MetaBar doc={doc} />
-      <div className={cn('min-h-0 flex-1', !framed && 'overflow-hidden')}>{body()}</div>
+      <div ref={bodyRef} className={cn('relative min-h-0 flex-1', !framed && 'overflow-hidden')}>
+        {body()}
+        {zoomable && !loading && !error ? (
+          <div className="absolute bottom-4 right-4 z-20 flex items-center gap-0.5 rounded-full border border-line bg-surface/95 p-1 text-xs text-ink-2 shadow-[var(--shadow-pop)] backdrop-blur">
+            <button
+              type="button"
+              title="缩小（Ctrl+-）"
+              onClick={() => setZoom((value) => clampZoom(value - 0.25))}
+              className="rounded-full p-1.5 transition-colors hover:bg-hover hover:text-ink disabled:opacity-40"
+              disabled={zoom <= ZOOM_MIN}
+            >
+              <Minus className="size-3.5" />
+            </button>
+            <button
+              type="button"
+              title="重置为 100%（Ctrl+0）"
+              onClick={() => setZoom(1)}
+              className="min-w-[3.25rem] rounded-full px-1.5 py-1 text-center tabular-nums transition-colors hover:bg-hover hover:text-ink"
+            >
+              {Math.round(zoom * 100)}%
+            </button>
+            <button
+              type="button"
+              title="放大（Ctrl+=）"
+              onClick={() => setZoom((value) => clampZoom(value + 0.25))}
+              className="rounded-full p-1.5 transition-colors hover:bg-hover hover:text-ink disabled:opacity-40"
+              disabled={zoom >= ZOOM_MAX}
+            >
+              <Plus className="size-3.5" />
+            </button>
+            <span className="mx-1 h-4 w-px bg-line" />
+            <button
+              type="button"
+              title="适应窗口"
+              onClick={() => setZoom(1)}
+              className="rounded-full px-2 py-1 transition-colors hover:bg-hover hover:text-ink"
+            >
+              适应
+            </button>
+          </div>
+        ) : null}
+      </div>
     </div>
   );
   return pane;

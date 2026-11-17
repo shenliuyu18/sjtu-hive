@@ -2,7 +2,7 @@ import { renderAsync } from 'docx-preview';
 import { useEffect, useRef, useState } from 'react';
 import { Spinner } from '@/components/ui/Misc';
 
-export function DocxPreview({ url }: { url: string }) {
+export function DocxPreview({ url, zoom = 1 }: { url: string; zoom?: number }) {
   const ref = useRef<HTMLDivElement>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -53,7 +53,7 @@ export function DocxPreview({ url }: { url: string }) {
           {error}
         </div>
       ) : null}
-      <div ref={ref} className="docx-preview-host mx-auto" />
+      <div ref={ref} className="docx-preview-host mx-auto" style={{ zoom }} />
     </div>
   );
 }
