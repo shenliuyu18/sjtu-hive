@@ -35,8 +35,9 @@ const targets = [
   {
     label: 'wails.json',
     path: 'wails.json',
-    apply: (text, v) => replaceJsonVersion(text, 'info', 'productVersion', `${v}.0`),
-    has: (text, v) => hasJsonVersion(text, 'info', 'productVersion', `${v}.0`),
+    // NSIS 的 VIFileVersion 只接受 X.X.X.X；预发布号（-beta.1）不能进这里
+    apply: (text, v) => replaceJsonVersion(text, 'info', 'productVersion', `${numericVersion(v)}.0`),
+    has: (text, v) => hasJsonVersion(text, 'info', 'productVersion', `${numericVersion(v)}.0`),
   },
   {
     label: 'frontend/package.json',
@@ -60,8 +61,15 @@ const targets = [
     path: 'site/index.html',
     apply: (text, v) => patchSite(text, v),
     has: (text, v) => patchSite(text, v) === text,
+    // 官网只跟正式版：预发布（1.3.3-beta.1）不上官网主下载区
+    stableOnly: true,
   },
 ];
+
+const isPrerelease = (version) => version.includes('-');
+
+/** 1.3.3-beta.1 → 1.3.3（NSIS / 文件属性只能用纯数字版本） */
+const numericVersion = (version) => version.split(/[-+]/)[0];
 
 function escapeRe(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -134,6 +142,10 @@ function main() {
 function sync(version) {
   let changed = 0;
   for (const target of targets) {
+    if (target.stableOnly && isPrerelease(version)) {
+      console.log(`· ${target.label} 预发布不改官网，跳过`);
+      continue;
+    }
     const file = join(root, target.path);
     const original = readFileSync(file, 'utf8');
     const next = target.apply(original, version);
@@ -151,6 +163,7 @@ function sync(version) {
 function check(version) {
   const stale = [];
   for (const target of targets) {
+    if (target.stableOnly && isPrerelease(version)) continue;
     const file = join(root, target.path);
     const text = readFileSync(file, 'utf8');
     if (!target.has(text, version)) stale.push(target.path);
