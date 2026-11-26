@@ -61,6 +61,27 @@ jobs:
           shasum -a 256 * > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
+
+      - name: 启动冒烟验证
+        run: |
+          set -euo pipefail
+          APP="build/bin/SJTU Hive.app"
+          open "$APP"
+          sleep 12
+          pgrep -fl "SJTU Hive.app/Contents/MacOS/SJTU-Hive" || (echo "app did not start"; exit 1)
+          screencapture -x smoke.png
+          mkdir -p smoke-logs
+          cp -R "$HOME/Library/Logs/SJTU Hive" smoke-logs/ 2>/dev/null || true
+          grep -R "menu bar tray ready" smoke-logs/ || (echo "tray log missing"; exit 1)
+          pkill -f "SJTU Hive.app/Contents/MacOS/SJTU-Hive" || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sjtu-hive-macos-smoke
+          path: |
+            smoke.png
+            smoke-logs/
+
       - uses: actions/upload-artifact@v4
         with:
           name: sjtu-hive-macos-${{ env.VERSION }}
