@@ -534,7 +534,7 @@ const shuiyuanTopics: ShuiyuanTopicSummary[] = [
 
 const shuiyuanPosts: ShuiyuanPost[] = [
   { id: 11, postNumber: 1, username: 'student', name: '同学 A', avatarTemplate: '/user_avatar/shuiyuan.sjtu.edu.cn/student/{size}/1_2.png', createdAt: isoAt(-1, 10), cooked: '<p>想找一个会写 Python 的同学一起做课程项目，方向是推荐系统。</p><p>目前已经完成了数据清洗，计划使用协同过滤 + 轻量排序模型。</p><ul><li>熟悉 pandas / NumPy</li><li>每周能投入 6 小时以上</li></ul><p>有兴趣的同学可以私信我。</p>', replyToPostNumber: null, likeCount: 12, liked: false, yours: false },
-  { id: 12, postNumber: 2, username: 'liming', name: '李明', avatarTemplate: null, createdAt: isoAt(-1, 11), cooked: '<p>我做过一个类似的电影推荐项目，可以一起讨论。</p><blockquote><p>方向是推荐系统</p></blockquote>', replyToPostNumber: 1, likeCount: 5, liked: false, yours: false },
+  { id: 12, postNumber: 2, username: 'liming', name: '李明', avatarTemplate: null, createdAt: isoAt(-1, 11), cooked: '<p>我做过一个类似的电影推荐项目，可以一起讨论。</p><blockquote><p>方向是推荐系统</p></blockquote><p><img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGAAAABACAIAAABqVuVZAAAAeklEQVR4nO3QMQ0AIBDAQIS9fxWIwQELAx0uqYDm1p7RpfX9IB4gQIAAAQoHCBAgQIDCAQIECBCgcIAAAQIEKBwgQIAAAQoHCBAgQIDCAQIECBCgcIAAAQIEKBwgQIAAAQoHCBAgQIDCAQIECBCgcIAAAQIEKBwgQG8dxVLh0t5nLI4AAAAASUVORK5CYII=" alt="测试图片"></p>', replyToPostNumber: 1, likeCount: 5, liked: false, yours: false },
   { id: 13, postNumber: 3, username: 'zhang', name: '张同学', avatarTemplate: null, createdAt: isoAt(0, 9), cooked: '<p>我也想参加，主要熟悉后端和部署，可以负责接口和 Docker。</p>', replyToPostNumber: 1, likeCount: 3, liked: false, yours: false },
 ];
 
@@ -1053,6 +1053,8 @@ export async function mockCall<T>(
       const page: ShuiyuanTopicPage = { topics: list, moreUrl: null };
       return page as T;
     }
+    case 'shuiyuan.imagePreview':
+      return { name: 'demo.png', dataUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAGAAAABACAIAAABqVuVZAAAAeklEQVR4nO3QMQ0AIBDAQIS9fxWIwQELAx0uqYDm1p7RpfX9IB4gQIAAAQoHCBAgQIDCAQIECBCgcIAAAQIEKBwgQIAAAQoHCBAgQIDCAQIECBCgcIAAAQIEKBwgQIAAAQoHCBAgQIDCAQIECBCgcIAAAQIEKBwgQG8dxVLh0t5nLI4AAAAASUVORK5CYII=' } as T;
     case 'shuiyuan.topic': {
       const id = Number(args[0]);
       const topic = shuiyuanTopics.find((item) => item.id === id);

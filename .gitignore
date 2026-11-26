@@ -20,3 +20,7 @@ dist/
 keystore.properties
 *.jks
 *.keystore
+
+# Playwright
+frontend/test-results/
+frontend/playwright-report/

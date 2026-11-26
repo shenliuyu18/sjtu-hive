@@ -8,7 +8,9 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "build:legacy": "esbuild scripts/legacy-android.ts --bundle --format=iife --global-name=LegacyViewer --platform=browser --target=chrome87 --outfile=../android/app/src/main/assets/legacy/viewer.js"
+    "build:legacy": "esbuild scripts/legacy-android.ts --bundle --format=iife --global-name=LegacyViewer --platform=browser --target=chrome87 --outfile=../android/app/src/main/assets/legacy/viewer.js",
+    "e2e": "npm run build && playwright test",
+    "e2e:install": "playwright install chromium"
   },
   "dependencies": {
     "@codemirror/lang-markdown": "^6.5.2",
@@ -54,6 +56,7 @@
     "zustand": "^5.0.16"
   },
   "devDependencies": {
+    "@playwright/test": "^1.65.1",
     "@tailwindcss/vite": "^4.3.3",
     "@types/node": "^26.6.6",
     "@types/react": "^19.1.0",
