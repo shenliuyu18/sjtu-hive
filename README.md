@@ -94,7 +94,7 @@ macOS 需在 macOS 本机构建（Cocoa/CGO 无法在 Windows 交叉生成可执
 go run github.com/wailsapp/wails/v2/cmd/wails@v2.16.0 build -platform darwin/universal
 ```
 
-`.github/workflows/macos.yml` 会在 `macos-14` 上跑测试、构建 Universal `.app`、ad-hoc 签名并产出 `.dmg` / `.app.zip`；打 `v*` 标签时自动上传到对应 Release。
+`.github/workflows/macos.yml` 会在 `macos-15-intel` 上跑测试、构建 Universal `.app`、ad-hoc 签名并产出 `.dmg` / `.app.zip`；打 `v*` 标签时自动上传到对应 Release。
 
 前端可单独预览：`cd frontend && npm install && npm run dev`；浏览器模式下由 `src/lib/mock.ts` 提供演示数据。
 
