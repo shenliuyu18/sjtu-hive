@@ -1084,6 +1084,7 @@ function WorkspaceWelcome({
   onOpenTerminal: () => void;
   onShowRecent: () => void;
 }) {
+  const isMac = useSettings((state) => state.info?.platform === 'darwin');
   return (
     <div className="scroll-thin h-full overflow-y-auto">
       <div className="mx-auto max-w-4xl px-8 py-10">
@@ -1122,7 +1123,7 @@ function WorkspaceWelcome({
             </div>
             <div>
               <div className="text-sm font-medium text-ink">打开终端</div>
-              <div className="mt-0.5 text-[0.66rem] text-ink-3">在项目目录启动 Git Bash / PowerShell。</div>
+              <div className="mt-0.5 text-[0.66rem] text-ink-3">{isMac ? '在项目目录启动 Terminal（zsh / bash）。' : '在项目目录启动 Git Bash / PowerShell。'}</div>
             </div>
           </button>
         </div>

@@ -80,7 +80,7 @@ function saveMockSettings(state: SettingsState) {
 let settings = loadMockSettings();
 
 const mockInfo: AppInfo = {
-  version: '0.1.0',
+  version: __APP_VERSION__,
   name: 'SJTU Hive',
   platform: 'windows',
   arch: 'amd64',
