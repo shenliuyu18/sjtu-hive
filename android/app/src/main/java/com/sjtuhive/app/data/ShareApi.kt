@@ -19,6 +19,8 @@ import java.util.concurrent.TimeUnit
 
 data class ShareCourse(val id: Long, val name: String, val subtitle: String)
 
+data class ShareBanner(val title: String, val content: String)
+
 data class ShareMaterial(
     val id: Long,
     val title: String,
@@ -162,8 +164,16 @@ class ShareApi(private val context: Context) {
         }
     }
 
-    suspend fun searchCourses(keyword: String): List<ShareCourse> = withContext(Dispatchers.IO) {
-        val data = post("/api/v1/course/search", JSONObject().put("keyword", keyword.trim()))
+    suspend fun banners(): List<ShareBanner> = withContext(Dispatchers.IO) {
+        val data = get("/api/v1/banner")
+        asArray(data).mapNotNull { item ->
+            val title = text(item, "title", "name").ifBlank { "公告" }
+            val content = text(item, "content", "description", "body")
+            if (title.isBlank() && content.isBlank()) null else ShareBanner(title, content)
+        }
+    }
+
+    suspend fun searchCourses(keyword: String): List<ShareCourse> = withContext(Dispatchers.IO) {        val data = post("/api/v1/course/search", JSONObject().put("keyword", keyword.trim()))
         asArray(data).mapNotNull { item ->
             val id = item.optLong("id", item.optLong("course_id"))
             if (id <= 0) return@mapNotNull null

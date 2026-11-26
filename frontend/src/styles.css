@@ -230,6 +230,15 @@
   font-size: 1rem;
   word-break: break-word;
 }
+.shuiyuan-post img {
+  cursor: zoom-in;
+}
+.shuiyuan-post .lightbox-wrapper .meta,
+.shuiyuan-post a.lightbox .meta,
+.shuiyuan-post .lightbox-wrapper .filename,
+.shuiyuan-post .lightbox-wrapper .informations {
+  display: none;
+}
 .markdown-body > *:first-child {
   margin-top: 0;
 }

@@ -249,9 +249,9 @@ func (e *Exams) Sync(ctx context.Context) (ExamState, error) {
 	}
 	if err := json.Unmarshal(data, &payload); err != nil {
 		e.mu.Lock()
-		e.lastErr = "考试接口没有返回预期数据"
+		e.lastErr = "考试接口返回的数据无法识别"
 		e.mu.Unlock()
-		return e.State(), errors.New("考试接口没有返回预期数据，请重新登录后再试")
+		return e.State(), errors.New("考试接口返回的数据无法识别，请稍后重试")
 	}
 
 	syncedAt := Now()

@@ -60,9 +60,6 @@ class PortalServicesApi(private val context: Context) {
             }
         }
         val apps = entities(appsJson).mapNotNull(::parseApp)
-        if (apps.isEmpty()) {
-            throw CampusAuthException("交我办没有返回办事应用，请重新登录 jAccount")
-        }
         val counts = apps.groupingBy { it.topCategoryName }.eachCount()
         val categories = entities(categoryJson)
             .mapNotNull { item ->

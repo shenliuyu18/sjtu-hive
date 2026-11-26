@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -212,7 +211,7 @@ func (c *Classroom) RevealDownload(id string) error {
 	if _, err := os.Stat(target); err != nil {
 		return errors.New("文件已被移动或删除")
 	}
-	return exec.Command("explorer.exe", "/select,"+target).Start()
+	return revealTarget(target)
 }
 
 func videoFileName(name string, view int) string {

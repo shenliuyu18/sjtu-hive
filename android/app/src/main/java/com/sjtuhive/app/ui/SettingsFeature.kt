@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -83,6 +84,7 @@ import com.sjtuhive.app.R
 import com.sjtuhive.app.data.AndroidUpdate
 import com.sjtuhive.app.data.HiveNotifications
 import com.sjtuhive.app.data.HiveSession
+import com.sjtuhive.app.data.HiveSyncPrefs
 import com.sjtuhive.app.data.HiveThemePrefs
 import com.sjtuhive.app.data.UpdateApi
 import com.sjtuhive.app.ui.theme.HiveAccent
@@ -114,6 +116,8 @@ fun SettingsScreen(
     blurAlpha: Int,
     onBlurRadiusChange: (Int) -> Unit,
     onBlurAlphaChange: (Int) -> Unit,
+    fontScale: Float,
+    onFontScaleChange: (Float) -> Unit,
     servicesEnabled: Boolean,
     onServicesEnabledChange: (Boolean) -> Unit,
 ) {
@@ -313,6 +317,16 @@ fun SettingsScreen(
                         }
                     }
                 }
+                SettingGroup("文字") {
+                    SettingSliderRow(
+                        label = "字号缩放",
+                        valueText = "${(fontScale * 100).roundToInt()}%",
+                        value = fontScale,
+                        onValueChange = onFontScaleChange,
+                        valueRange = 0.7f..1.8f,
+                    )
+                    SettingInfoRow("影响应用内文字大小，不改变系统设置。")
+                }
                 SettingGroup("底栏") {
                     SettingSwitchRow(
                         title = "悬浮玻璃底栏",
@@ -357,6 +371,19 @@ fun SettingsScreen(
                 var scheduleValue by remember { mutableStateOf(HiveCacheManager.schedule(context)) }
                 // 缓存大小是普通函数计算，不参与状态；清理后靠这个 tick 强制重算
                 var refreshTick by remember { mutableIntStateOf(0) }
+                var mailInterval by remember { mutableStateOf(HiveSyncPrefs.mailInterval(context)) }
+                var canvasInterval by remember { mutableStateOf(HiveSyncPrefs.canvasInterval(context)) }
+                SettingGroup("自动同步") {
+                    SettingInfoRow("后台任务最短间隔 15 分钟；关闭后不再自动刷新。")
+                    SyncIntervalRow("邮件", mailInterval) {
+                        HiveSyncPrefs.setMailInterval(context, it)
+                        mailInterval = it
+                    }
+                    SyncIntervalRow("Canvas 与日历", canvasInterval) {
+                        HiveSyncPrefs.setCanvasInterval(context, it)
+                        canvasInterval = it
+                    }
+                }
                 SettingGroup("缓存明细（勾选 = 纳入自动清除）") {
                     val totalText = remember(refreshTick) {
                         formatBytes(HiveCacheManager.totalSize(context))
@@ -722,6 +749,33 @@ private fun SettingSliderRow(
             Text(valueText, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Slider(value = value, onValueChange = onValueChange, valueRange = valueRange)
+    }
+}
+
+@Composable
+private fun SyncIntervalRow(label: String, value: Int, onChange: (Int) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(label, style = MaterialTheme.typography.bodyMedium)
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            listOf(
+                0 to "关闭",
+                15 to "15 分钟",
+                30 to "30 分钟",
+                60 to "1 小时",
+                120 to "2 小时",
+            ).forEach { (minutes, text) ->
+                FilterChip(
+                    selected = value == minutes,
+                    onClick = { onChange(minutes) },
+                    label = { Text(text) },
+                )
+            }
+        }
     }
 }
 

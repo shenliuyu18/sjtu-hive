@@ -361,7 +361,7 @@ export function CloudPanPage() {
           )}
           <div className="flex shrink-0 items-center gap-2 border-t border-line px-3 py-2 text-[0.62rem] text-ink-3">
             {state?.connected ? <Badge variant="success">已连接</Badge> : <Badge>未连接</Badge>}
-            <span>{state?.account ? `@${state.account}` : '未登录'}</span>
+            <span>{state?.account ? `@${state.account}` : state?.connected ? '已连接' : '未登录'}</span>
             {state?.lastSyncedAt ? <span>· 会话更新于 {state.lastSyncedAt.slice(0, 16)}</span> : null}
           </div>
         </Card>

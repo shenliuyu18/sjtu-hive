@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	goruntime "runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -23,9 +24,15 @@ const (
 	updateOwner      = "shenliuyu18"
 	updateRepo       = "sjtu-hive"
 	updateAPI        = "https://api.github.com/repos/" + updateOwner + "/" + updateRepo + "/releases/latest"
-	updatePageURL    = "https://github.com/" + updateOwner + "/" + updateRepo + "/releases/latest"
-	updateAssetMatch = "windows-amd64-installer.exe"
+	updatePageURL = "https://github.com/" + updateOwner + "/" + updateRepo + "/releases/latest"
 )
+
+func updateAssetSuffix() string {
+	if goruntime.GOOS == "darwin" {
+		return "macos-universal.dmg"
+	}
+	return "windows-amd64-installer.exe"
+}
 
 type UpdateAsset struct {
 	Name   string `json:"name"`
@@ -198,7 +205,7 @@ func (u *Update) Check() (UpdateInfo, error) {
 		info.PageURL = release.HTMLURL
 	}
 	for _, asset := range release.Assets {
-		if strings.Contains(strings.ToLower(asset.Name), updateAssetMatch) {
+		if strings.Contains(strings.ToLower(asset.Name), updateAssetSuffix()) {
 			info.Asset = &UpdateAsset{Name: asset.Name, URL: asset.URL, Size: asset.Size, Digest: asset.Digest}
 			break
 		}
@@ -210,7 +217,7 @@ func (u *Update) Check() (UpdateInfo, error) {
 	info.Available = true
 	info.Message = "发现新版本 " + latest
 	if info.Asset == nil {
-		info.Message = "发现新版本 " + latest + "，但这个版本没有提供 Windows 安装包，请到发布页下载。"
+		info.Message = "发现新版本 " + latest + "，但这个版本没有提供当前平台的安装包，请到发布页下载。"
 	}
 	return info, nil
 }
@@ -236,8 +243,10 @@ func (u *Update) Download(assetURL, name, digest string) (map[string]any, error)
 		return nil, err
 	}
 	fileName := filepath.Base(strings.TrimSpace(name))
-	if !strings.HasSuffix(strings.ToLower(fileName), ".exe") {
-		return nil, errors.New("更新包不是 Windows 安装程序")
+	lowerName := strings.ToLower(fileName)
+	validPackage := strings.HasSuffix(lowerName, ".exe") || strings.HasSuffix(lowerName, ".dmg")
+	if !validPackage {
+		return nil, errors.New("更新包格式无效")
 	}
 	u.mu.Lock()
 	if u.download {
@@ -331,6 +340,13 @@ func (u *Update) Install(path string) error {
 	}
 	if _, err := os.Stat(clean); err != nil {
 		return errors.New("安装包不存在，请重新下载")
+	}
+	if goruntime.GOOS == "darwin" {
+		// macOS 分发的是 .dmg：挂载后由用户拖入 Applications，不做静默覆盖。
+		if err := exec.Command("open", clean).Start(); err != nil {
+			return fmt.Errorf("打开安装镜像失败：%w", err)
+		}
+		return nil
 	}
 	command := exec.Command(clean)
 	command.Dir = dir

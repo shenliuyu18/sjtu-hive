@@ -6,6 +6,7 @@ import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -14,8 +15,10 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -41,6 +44,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.sjtuhive.app.data.ShareApi
 import com.sjtuhive.app.data.ShareAuthException
+import com.sjtuhive.app.data.ShareBanner
 import com.sjtuhive.app.data.ShareCourse
 import com.sjtuhive.app.data.ShareMaterial
 import com.sjtuhive.app.data.safeShareFileName
@@ -56,6 +60,7 @@ fun ShareScreen(context: Context, onClose: () -> Unit) {
     var showLogin by remember { mutableStateOf(false) }
     var keyword by remember { mutableStateOf("") }
     var courses by remember { mutableStateOf<List<ShareCourse>>(emptyList()) }
+    var banners by remember { mutableStateOf<List<ShareBanner>>(emptyList()) }
     var selectedCourse by remember { mutableStateOf<ShareCourse?>(null) }
     var materials by remember { mutableStateOf<List<ShareMaterial>>(emptyList()) }
     var detail by remember { mutableStateOf<ShareMaterial?>(null) }
@@ -90,6 +95,11 @@ fun ShareScreen(context: Context, onClose: () -> Unit) {
 
     LaunchedEffect(Unit) {
         if (!loggedIn) autoLogin()
+    }
+
+    LaunchedEffect(loggedIn) {
+        if (!loggedIn) return@LaunchedEffect
+        runCatching { api.banners() }.onSuccess { banners = it }
     }
 
     fun search() {
@@ -323,6 +333,15 @@ fun ShareScreen(context: Context, onClose: () -> Unit) {
                     items(materials, key = { it.id }) { item ->
                         InfoRow(item.title, item.subtitle) { openMaterial(item) }
                     }
+                    if (materials.isEmpty() && error == null) {
+                        item {
+                            Text(
+                                "这门课程暂无共享资料。",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                        }
+                    }
                     error?.let { message ->
                         item { Text(message, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
                     }
@@ -331,6 +350,36 @@ fun ShareScreen(context: Context, onClose: () -> Unit) {
             return@Column
         }
 
+        if (loggedIn && banners.isNotEmpty()) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                banners.take(3).forEach { banner ->
+                    Column(
+                        Modifier
+                            .width(240.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(MaterialTheme.colorScheme.surface)
+                            .padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Text(banner.title, style = MaterialTheme.typography.labelLarge, maxLines = 1)
+                        if (banner.content.isNotBlank()) {
+                            Text(
+                                banner.content,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 2,
+                            )
+                        }
+                    }
+                }
+            }
+        }
         OutlinedTextField(
             value = keyword,
             onValueChange = { keyword = it },

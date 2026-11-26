@@ -3,10 +3,12 @@ package main
 import (
 	"context"
 	"embed"
+	goruntime "runtime"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
+	"github.com/wailsapp/wails/v2/pkg/options/mac"
 	"github.com/wailsapp/wails/v2/pkg/options/windows"
 
 	"sjtu-desk/internal/app"
@@ -26,7 +28,7 @@ func main() {
 		Height:    900,
 		MinWidth:  1024,
 		MinHeight: 680,
-		Frameless: true,
+		Frameless: goruntime.GOOS != "darwin",
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},
@@ -50,6 +52,14 @@ func main() {
 			ZoomFactor:           1,
 			IsZoomControlEnabled: false,
 			DisablePinchZoom:     true,
+		},
+		Mac: &mac.Options{
+			TitleBar:   mac.TitleBarHiddenInset(),
+			Appearance: mac.DefaultAppearance,
+			About: &mac.AboutInfo{
+				Title:   "SJTU Hive",
+				Message: "A local-first campus desktop app for SJTU students.",
+			},
 		},
 		Debug: options.Debug{OpenInspectorOnStartup: false},
 	})

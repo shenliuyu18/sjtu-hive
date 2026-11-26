@@ -2,7 +2,7 @@
 // 一次产出可发布的三件套：Windows 绿色版 ZIP、Windows 安装包 EXE、Android APK。
 // 用法：
 //   node tools/release.mjs                 全量构建并输出到 dist/
-//   node tools/release.mjs --skip-android  只出 Windows
+//   node tools/release.mjs --skip-android  只出 Windows（macOS 由 .github/workflows/macos.yml 构建）
 //   node tools/release.mjs --skip-installer 跳过 NSIS（未装 makensis 时）
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -23,6 +23,8 @@ const binaries = {
   installer: `SJTU-Hive-${version}-windows-amd64-installer.exe`,
   apk: `SJTU-Hive-${version}-android.apk`,
   mapping: `SJTU-Hive-${version}-android-mapping.txt`,
+  macDmg: `SJTU-Hive-${version}-macos-universal.dmg`,
+  macZip: `SJTU-Hive-${version}-macos-universal.app.zip`,
 };
 
 function log(message) {

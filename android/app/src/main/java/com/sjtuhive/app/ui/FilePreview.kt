@@ -23,7 +23,10 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.horizontalScroll
@@ -38,7 +41,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -66,6 +68,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
@@ -78,12 +81,15 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -101,6 +107,8 @@ import java.io.File
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.zip.ZipFile
+import kotlin.math.abs
+import kotlin.math.roundToInt
 
 /** 内置预览：云盘文件与邮件附件统一走这个入口。 */
 data class PreviewRequest(
@@ -125,12 +133,16 @@ object PreviewHost {
     }
 }
 
-private enum class PreviewKind { PDF, IMAGE, TEXT, AUDIO, VIDEO, DOCX, XLSX, PPTX, DOC, PPT, XLS_LEGACY, UNKNOWN }
+private enum class PreviewKind { PDF, IMAGE, TEXT, MARKDOWN, HTML, AUDIO, VIDEO, DOCX, XLSX, PPTX, DOC, PPT, XLS_LEGACY, UNKNOWN }
+
+private data class ZoomAnchor(val scroll: Int, val focus: Float, val zoom: Float)
 
 private fun kindOf(fileName: String): PreviewKind = when (fileName.substringAfterLast('.', "").lowercase()) {
     "pdf" -> PreviewKind.PDF
     "png", "jpg", "jpeg", "gif", "webp", "bmp", "heic", "heif" -> PreviewKind.IMAGE
-    "txt", "md", "markdown", "csv", "log", "json", "xml", "yaml", "yml", "ini", "kt", "java", "go", "py", "js", "ts", "html", "css" -> PreviewKind.TEXT
+    "md", "markdown" -> PreviewKind.MARKDOWN
+    "html", "htm" -> PreviewKind.HTML
+    "txt", "csv", "log", "json", "xml", "yaml", "yml", "ini", "kt", "java", "go", "py", "js", "ts", "css" -> PreviewKind.TEXT
     "mp3", "wav", "m4a", "aac", "flac", "ogg", "opus" -> PreviewKind.AUDIO
     "mp4", "mkv", "webm", "mov", "3gp", "ts" -> PreviewKind.VIDEO
     "docx" -> PreviewKind.DOCX
@@ -159,8 +171,21 @@ private fun FilePreviewScreen(request: PreviewRequest) {
     val kind = remember(request.fileName) { kindOf(request.fileName) }
     val scope = rememberCoroutineScope()
     var zoom by remember(request) { mutableFloatStateOf(1f) }
+    val horizontalScroll = remember(request) { ScrollState(0) }
+    var zoomAnchor by remember(request) { mutableStateOf<ZoomAnchor?>(null) }
     val zoomable = kind == PreviewKind.PDF || kind == PreviewKind.PPTX ||
         kind == PreviewKind.DOCX || kind == PreviewKind.XLSX || kind == PreviewKind.TEXT
+
+    // 页面宽度随 zoom 重排后，把手指焦点下的内容留在原位。
+    LaunchedEffect(zoom) {
+        val anchor = zoomAnchor ?: return@LaunchedEffect
+        withFrameNanos { }
+        withFrameNanos { }
+        val ratio = zoom / anchor.zoom
+        val target = anchor.scroll * ratio + anchor.focus * (ratio - 1f)
+        horizontalScroll.scrollTo(target.roundToInt().coerceIn(0, horizontalScroll.maxValue))
+        zoomAnchor = null
+    }
 
     BackHandler {
         if (fullscreen) fullscreen = false else PreviewHost.close()
@@ -437,7 +462,20 @@ private fun FilePreviewScreen(request: PreviewRequest) {
                 }
             }
 
-            Box(Modifier.weight(1f)) {
+            Box(
+                Modifier
+                    .weight(1f)
+                    .pinchToZoom(
+                        enabled = zoomable && file != null && !loading && error == null,
+                    ) { factor, focusX ->
+                        val old = zoom
+                        val next = (old * factor).coerceIn(1f, 4f)
+                        if (next != old) {
+                            zoomAnchor = ZoomAnchor(horizontalScroll.value, focusX, old)
+                            zoom = next
+                        }
+                    },
+            ) {
                 when {
                     loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         CircularProgressIndicator()
@@ -456,13 +494,21 @@ private fun FilePreviewScreen(request: PreviewRequest) {
                         Button(onClick = { reloadTick++ }) { Text("重试") }
                     }
                     file != null -> when (kind) {
-                        PreviewKind.PDF -> PdfPreview(file!!, zoom)
+                        PreviewKind.PDF -> PdfPreview(file!!, zoom, horizontalScroll)
                         PreviewKind.IMAGE -> ZoomableImage(file!!)
                         PreviewKind.TEXT -> TextPreview(file!!, zoom)
+                        PreviewKind.MARKDOWN -> RichHtmlPreview(
+                            html = markdownToHtml(rememberText(file!!)),
+                            isDark = isDarkTheme,
+                        )
+                        PreviewKind.HTML -> RichHtmlPreview(
+                            html = rememberText(file!!),
+                            isDark = isDarkTheme,
+                        )
                         PreviewKind.AUDIO -> AudioPreview(file!!, request.title)
                         PreviewKind.VIDEO -> VideoPreview(file!!)
                         PreviewKind.DOCX, PreviewKind.XLSX -> OfficePreview(file!!, request.fileName, zoom)
-                        PreviewKind.PPTX -> PptxSlidesPreview(file!!, zoom)
+                        PreviewKind.PPTX -> PptxSlidesPreview(file!!, zoom, horizontalScroll)
                         PreviewKind.DOC -> LegacyOfficePreview(file!!, "doc")
                         PreviewKind.PPT -> LegacyOfficePreview(file!!, "ppt")
                         PreviewKind.XLS_LEGACY -> LegacyOfficePreview(file!!, "xls")
@@ -505,14 +551,19 @@ private fun FilePreviewScreen(request: PreviewRequest) {
             }
         }
 
-        if (zoomable && file != null && !loading && error == null) {
-            PreviewZoomBar(
-                zoom = zoom,
-                onZoom = { zoom = it.coerceIn(1f, 3f) },
+        if (zoomable && zoom > 1.001f && file != null) {
+            TextButton(
+                onClick = {
+                    zoomAnchor = null
+                    zoom = 1f
+                    scope.launch { horizontalScroll.scrollTo(0) }
+                },
                 modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(bottom = 16.dp),
-            )
+                    .align(Alignment.BottomEnd)
+                    .padding(16.dp)
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.9f)),
+            ) { Text("${(zoom * 100).roundToInt()}% · 复位") }
         }
 
         if (fullscreen) {
@@ -532,24 +583,39 @@ private fun FilePreviewScreen(request: PreviewRequest) {
     }
 }
 
-@Composable
-private fun PreviewZoomBar(zoom: Float, onZoom: (Float) -> Unit, modifier: Modifier = Modifier) {
-    Row(
-        modifier
-            .clip(RoundedCornerShape(24.dp))
-            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.94f))
-            .padding(horizontal = 6.dp, vertical = 2.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        TextButton(onClick = { onZoom(zoom - 0.25f) }, enabled = zoom > 1f) { Text("−") }
-        Text(
-            "${(zoom * 100).toInt()}%",
-            modifier = Modifier.widthIn(min = 52.dp),
-            textAlign = TextAlign.Center,
-            style = MaterialTheme.typography.labelMedium,
-        )
-        TextButton(onClick = { onZoom(zoom + 0.25f) }, enabled = zoom < 3f) { Text("+") }
-        TextButton(onClick = { onZoom(1f) }) { Text("适应") }
+/** 双指捏合缩放：只在两指按下时接管手势，单指滚动仍交给内部列表。 */
+private fun Modifier.pinchToZoom(
+    enabled: Boolean,
+    onZoom: (factor: Float, focusX: Float) -> Unit,
+): Modifier = if (!enabled) {
+    this
+} else {
+    pointerInput(enabled) {
+        awaitEachGesture {
+            awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+            var lastDistance = 0f
+            while (true) {
+                val event = awaitPointerEvent(PointerEventPass.Initial)
+                val pressed = event.changes.filter { it.pressed }
+                if (pressed.size >= 2) {
+                    val first = pressed[0].position
+                    val second = pressed[1].position
+                    val distance = (first - second).getDistance()
+                    // 第一帧只建立基线，避免第二根手指落下时跳变。
+                    if (lastDistance > 0f && distance > 0f) {
+                        val factor = distance / lastDistance
+                        if (abs(factor - 1f) > 0.003f) {
+                            onZoom(factor, (first.x + second.x) / 2f)
+                        }
+                    }
+                    lastDistance = distance
+                    pressed.forEach { it.consume() }
+                } else {
+                    lastDistance = 0f
+                }
+                if (event.changes.none { it.pressed }) break
+            }
+        }
     }
 }
 
@@ -562,21 +628,33 @@ private fun ZoomableImage(file: File) {
     }
     var scale by remember { mutableFloatStateOf(1f) }
     var offset by remember { mutableStateOf(Offset.Zero) }
+    var viewport by remember { mutableStateOf(IntSize.Zero) }
     Box(
         Modifier
             .fillMaxSize()
             .background(Color.Black)
+            .onSizeChanged { viewport = it }
             .pointerInput(Unit) {
                 detectTransformGestures { _, pan, zoom, _ ->
-                    scale = (scale * zoom).coerceIn(1f, 6f)
-                    offset = if (scale <= 1f) Offset.Zero else offset + pan
+                    val next = (scale * zoom).coerceIn(1f, 6f)
+                    scale = next
+                    if (next <= 1f) {
+                        offset = Offset.Zero
+                    } else {
+                        val maxX = viewport.width * (next - 1f) / 2f
+                        val maxY = viewport.height * (next - 1f) / 2f
+                        offset = Offset(
+                            (offset.x + pan.x).coerceIn(-maxX, maxX),
+                            (offset.y + pan.y).coerceIn(-maxY, maxY),
+                        )
+                    }
                 }
             }
             .pointerInput(Unit) {
                 detectTapGestures(
                     onDoubleTap = {
                         scale = if (scale > 1f) 1f else 2.5f
-                        if (scale <= 1f) offset = Offset.Zero
+                        offset = Offset.Zero
                     },
                 )
             },
@@ -599,7 +677,7 @@ private fun ZoomableImage(file: File) {
 }
 
 @Composable
-private fun PdfPreview(file: File, zoom: Float) {
+private fun PdfPreview(file: File, zoom: Float, horizontal: ScrollState) {
     var pageCount by remember(file) { mutableIntStateOf(-1) }
     var truncated by remember(file) { mutableStateOf(false) }
     var error by remember(file) { mutableStateOf<String?>(null) }
@@ -611,14 +689,14 @@ private fun PdfPreview(file: File, zoom: Float) {
             runCatching {
                 ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor ->
                     PdfRenderer(descriptor).use { renderer ->
-                        renderer.pageCount to (renderer.pageCount > 60)
+                        renderer.pageCount to false
                     }
                 }
             }
         }
         result.onSuccess {
-            pageCount = minOf(it.first, 60)
-            truncated = it.second
+            pageCount = it.first
+            truncated = false
         }.onFailure { error = it.message ?: "PDF 渲染失败" }
     }
 
@@ -634,9 +712,9 @@ private fun PdfPreview(file: File, zoom: Float) {
                 }
             }
             else -> {
-                val pageWidth = maxWidth * zoom
+                val renderZoom = (zoom * 10f).roundToInt() / 10f
+                val pageWidth = maxWidth * renderZoom
                 val targetWidth = with(density) { pageWidth.toPx() }.toInt().coerceIn(480, 2200)
-                val horizontal = rememberScrollState()
                 Box(Modifier.fillMaxSize().horizontalScroll(horizontal)) {
                     LazyColumn(Modifier.width(pageWidth).fillMaxHeight()) {
                         items(pageCount) { index ->
@@ -660,8 +738,9 @@ private fun PdfPreview(file: File, zoom: Float) {
 
 @Composable
 private fun PdfPage(file: File, index: Int, targetWidth: Int) {
-    var rendered by remember(file, index, targetWidth) { mutableStateOf<RenderedPdfPage?>(null) }
+    var rendered by remember(file, index) { mutableStateOf<RenderedPdfPage?>(null) }
     LaunchedEffect(file, index, targetWidth) {
+        if (rendered != null) delay(80)
         rendered = withContext(Dispatchers.IO) {
             runCatching {
                 ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor ->
@@ -703,7 +782,7 @@ private fun PdfPage(file: File, index: Int, targetWidth: Int) {
 private data class RenderedPdfPage(val bitmap: Bitmap, val ratio: Float)
 
 @Composable
-private fun PptxSlidesPreview(file: File, zoom: Float) {
+private fun PptxSlidesPreview(file: File, zoom: Float, horizontal: ScrollState) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val document = remember(file, context) { runCatching { PptxDocument(file, context.cacheDir) }.getOrNull() }
@@ -722,9 +801,9 @@ private fun PptxSlidesPreview(file: File, zoom: Float) {
     Box(Modifier.fillMaxSize().background(Color(0xFF111317))) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
             val density = LocalDensity.current
-            val pageWidth = maxWidth * zoom
+            val renderZoom = (zoom * 10f).roundToInt() / 10f
+            val pageWidth = maxWidth * renderZoom
             val targetWidth = with(density) { pageWidth.toPx() }.toInt().coerceIn(480, 2200)
-            val horizontal = rememberScrollState()
             Box(Modifier.fillMaxSize().horizontalScroll(horizontal)) {
                 LazyColumn(Modifier.width(pageWidth).fillMaxHeight()) {
                     items(document.slideCount) { index ->
@@ -779,12 +858,11 @@ private fun PptxSlidePage(
     videoPart: String?,
     onPlay: (String) -> Unit,
 ) {
-    var bitmap by remember(index, targetWidth) { mutableStateOf<Bitmap?>(null) }
-    LaunchedEffect(index, targetWidth) {
-        if (bitmap == null) {
-            bitmap = withContext(Dispatchers.IO) {
-                runCatching { document.render(index, targetWidth) }.getOrNull()
-            }
+    var bitmap by remember(document, index) { mutableStateOf<Bitmap?>(null) }
+    LaunchedEffect(document, index, targetWidth) {
+        if (bitmap != null) delay(80)
+        bitmap = withContext(Dispatchers.IO) {
+            runCatching { document.render(index, targetWidth) }.getOrNull()
         }
     }
     val image = bitmap
@@ -819,6 +897,155 @@ private fun PptxSlidePage(
         }
     }
 }
+
+@Composable
+private fun RichHtmlPreview(html: String, isDark: Boolean) {
+    val context = LocalContext.current
+    val webView = remember { WebView(context) }
+    val loaded = remember { arrayOfNulls<String>(1) }
+    DisposableEffect(webView) {
+        onDispose { webView.destroy() }
+    }
+    AndroidView(
+        modifier = Modifier.fillMaxSize(),
+        factory = {
+            webView.apply {
+                settings.javaScriptEnabled = false
+                settings.blockNetworkImage = true
+                settings.loadsImagesAutomatically = false
+                settings.domStorageEnabled = false
+                settings.allowFileAccess = false
+                // WebView 自己处理双指缩放，避免与 Compose 手势互相抢事件。
+                settings.setSupportZoom(true)
+                settings.builtInZoomControls = true
+                settings.displayZoomControls = false
+                webViewClient = object : WebViewClient() {
+                    override fun shouldOverrideUrlLoading(
+                        view: WebView?,
+                        request: WebResourceRequest?,
+                    ): Boolean {
+                        val url = request?.url?.toString() ?: return true
+                        return HiveLinkRouter.open(context, url)
+                    }
+                }
+            }
+        },
+        update = { view ->
+            if (loaded[0] != html) {
+                loaded[0] = html
+                val background = if (isDark) "#16181D" else "#FFFFFF"
+                val ink = if (isDark) "#E8EAED" else "#1A1C1F"
+                val link = if (isDark) "#8AB4F8" else "#1A73E8"
+                val rule = if (isDark) "#30343B" else "#E5E7EB"
+                val css = """
+                    body{background:$background;color:$ink;font:16px/1.7 -apple-system,system-ui,sans-serif;margin:0;padding:8px 4px 32px;word-break:break-word}
+                    h1,h2,h3,h4{line-height:1.35;margin:18px 0 8px}
+                    a{color:$link}
+                    img{max-width:100%;height:auto;border-radius:8px}
+                    pre,code{background:$rule;border-radius:8px;padding:2px 6px;white-space:pre-wrap;word-break:break-word;font-size:14px}
+                    pre{padding:12px}
+                    blockquote{border-left:3px solid $rule;margin:8px 0;padding-left:12px;opacity:.85}
+                    table{max-width:100%;border-collapse:collapse}
+                    td,th{border:1px solid $rule;padding:4px 6px}
+                """.trimIndent()
+                view.loadDataWithBaseURL(
+                    "about:blank",
+                    "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">" +
+                        "<style>$css</style>$html",
+                    "text/html",
+                    "UTF-8",
+                    null,
+                )
+            }
+        },
+    )
+}
+
+private fun markdownToHtml(source: String): String {
+    val output = StringBuilder()
+    var inCode = false
+    var inList = false
+    fun closeList() {
+        if (inList) {
+            output.append("</ul>")
+            inList = false
+        }
+    }
+    source.lines().forEach { line ->
+        val trimmed = line.trim()
+        if (trimmed.startsWith("```")) {
+            closeList()
+            if (inCode) {
+                output.append("</code></pre>")
+                inCode = false
+            } else {
+                output.append("<pre><code>")
+                inCode = true
+            }
+            return@forEach
+        }
+        if (inCode) {
+            output.append(escapeHtml(line)).append('\n')
+            return@forEach
+        }
+        when {
+            trimmed.isEmpty() -> closeList()
+            trimmed.startsWith("#") -> {
+                closeList()
+                val level = trimmed.takeWhile { it == '#' }.length.coerceAtMost(6)
+                output.append("<h$level>")
+                    .append(markdownInline(trimmed.drop(level).trim()))
+                    .append("</h$level>")
+            }
+            trimmed.startsWith("- ") || trimmed.startsWith("* ") -> {
+                if (!inList) {
+                    output.append("<ul>")
+                    inList = true
+                }
+                output.append("<li>")
+                    .append(markdownInline(trimmed.drop(2)))
+                    .append("</li>")
+            }
+            trimmed.startsWith("> ") -> {
+                closeList()
+                output.append("<blockquote>")
+                    .append(markdownInline(trimmed.drop(2)))
+                    .append("</blockquote>")
+            }
+            trimmed == "---" || trimmed == "***" -> {
+                closeList()
+                output.append("<hr>")
+            }
+            else -> {
+                closeList()
+                output.append("<p>").append(markdownInline(trimmed)).append("</p>")
+            }
+        }
+    }
+    if (inCode) output.append("</code></pre>")
+    closeList()
+    return output.toString()
+}
+
+private fun markdownInline(source: String): String {
+    var text = escapeHtml(source)
+    text = Regex("`([^`]+)`").replace(text) { "<code>${it.groupValues[1]}</code>" }
+    text = Regex("!\\[([^\\]]*)\\]\\(([^)]+)\\)").replace(text) {
+        "<img alt=\"${it.groupValues[1]}\" src=\"${it.groupValues[2]}\">"
+    }
+    text = Regex("\\[([^\\]]+)\\]\\(([^)]+)\\)").replace(text) {
+        "<a href=\"${it.groupValues[2]}\">${it.groupValues[1]}</a>"
+    }
+    text = Regex("\\*\\*([^*]+)\\*\\*").replace(text) { "<strong>${it.groupValues[1]}</strong>" }
+    text = Regex("\\*([^*]+)\\*").replace(text) { "<em>${it.groupValues[1]}</em>" }
+    return text
+}
+
+private fun escapeHtml(value: String): String = value
+    .replace("&", "&amp;")
+    .replace("<", "&lt;")
+    .replace(">", "&gt;")
+    .replace("\"", "&quot;")
 
 @Composable
 private fun TextPreview(file: File, zoom: Float) {

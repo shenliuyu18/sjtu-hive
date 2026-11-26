@@ -497,75 +497,90 @@ export function CanvasPage() {
         />
       );
     }
-    if (course.error) {
-      return (
-        <div className="m-4 rounded-lg border border-warning/30 bg-warning/10 px-4 py-3 text-xs text-warning">
-          上次同步失败：{course.error}
-        </div>
-      );
-    }
+    const syncError = course.error ? (
+      <div className="mx-4 mt-3 rounded-lg border border-warning/30 bg-warning/10 px-4 py-2 text-xs text-warning">
+        上次同步失败：{course.error}
+      </div>
+    ) : null;
     if (tab === 'files') {
       if (rootFiles.length === 0) {
         return (
-          <EmptyState
-            icon={FolderOpen}
-            title={query.trim() ? '没有匹配的文件' : '还没有同步课程资料'}
-            description={query.trim() ? '换个关键词试试。' : '首次同步会读取文件夹、模块与课件列表。'}
-            action={
-              !query.trim() ? (
-                <Button size="sm" onClick={() => void syncCourse(course.id)} disabled={syncingCourse !== null}>
-                  {syncingCourse === course.id ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}
-                  同步本课程
-                </Button>
-              ) : null
-            }
-          />
+          <div className="flex h-full flex-col">
+            {syncError}
+            <EmptyState
+              icon={FolderOpen}
+              title={query.trim() ? '没有匹配的文件' : course.syncedAt ? '这门课程没有文件' : '还没有同步课程资料'}
+              description={
+                query.trim()
+                  ? '换个关键词试试。'
+                  : course.syncedAt
+                    ? '课程里没有已发布的课件，或 Canvas 未开放文件。'
+                    : '首次同步会读取文件夹、模块与课件列表。'
+              }
+              action={
+                !query.trim() ? (
+                  <Button size="sm" onClick={() => void syncCourse(course.id)} disabled={syncingCourse !== null}>
+                    {syncingCourse === course.id ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />}
+                    同步本课程
+                  </Button>
+                ) : null
+              }
+            />
+          </div>
         );
       }
       return (
-        <div className="scroll-thin h-full overflow-y-auto py-2">
-          {query.trim() ? (
-            fileItems.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                onClick={() => void openPreview(item)}
-                className="flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-xs text-ink-2 hover:bg-hover hover:text-ink"
-                style={{ paddingLeft: `${(item.parentId ? 2 : 1) * 14 + 6}px` }}
-              >
-                <FileGlyph item={item} />
-                <span className="min-w-0 flex-1 truncate">{item.name}</span>
-              </button>
-            ))
-          ) : (
-            rootFiles.map((item) => (
-              <TreeRow
-                key={item.id}
-                item={item}
-                depth={0}
-                allItems={fileItems}
-                expanded={expanded}
-                onToggle={toggleExpanded}
-                onOpen={(value) => void openPreview(value)}
-                selectedId={selectedItemId}
-              />
-            ))
-          )}
+        <div className="flex h-full min-h-0 flex-col">
+          {syncError}
+          <div className="scroll-thin min-h-0 flex-1 overflow-y-auto py-2">
+            {query.trim() ? (
+              fileItems.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => void openPreview(item)}
+                  className="flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-xs text-ink-2 hover:bg-hover hover:text-ink"
+                  style={{ paddingLeft: `${(item.parentId ? 2 : 1) * 14 + 6}px` }}
+                >
+                  <FileGlyph item={item} />
+                  <span className="min-w-0 flex-1 truncate">{item.name}</span>
+                </button>
+              ))
+            ) : (
+              rootFiles.map((item) => (
+                <TreeRow
+                  key={item.id}
+                  item={item}
+                  depth={0}
+                  allItems={fileItems}
+                  expanded={expanded}
+                  onToggle={toggleExpanded}
+                  onOpen={(value) => void openPreview(value)}
+                  selectedId={selectedItemId}
+                />
+              ))
+            )}
+          </div>
         </div>
       );
     }
     if (tab === 'assignments') {
       if (assignments.length === 0) {
         return (
-          <EmptyState
-            icon={CheckCircle2}
-            title="暂无作业"
-            description="同步课程后，Canvas 作业与截止时间会出现在这里。"
-          />
+          <div className="flex h-full flex-col">
+            {syncError}
+            <EmptyState
+              icon={CheckCircle2}
+              title="暂无作业"
+              description="同步课程后，Canvas 作业与截止时间会出现在这里。"
+            />
+          </div>
         );
       }
       return (
-        <div className="scroll-thin h-full overflow-y-auto">
+        <div className="flex h-full min-h-0 flex-col">
+          {syncError}
+          <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
           {assignments.map((item) => {
             const submissionState = itemText(item, 'submissionState');
             const points = itemNumber(item, 'points');
@@ -609,20 +624,26 @@ export function CanvasPage() {
               </button>
             );
           })}
+          </div>
         </div>
       );
     }
     if (pages.length === 0) {
       return (
-        <EmptyState
-          icon={FileText}
-          title="暂无页面或讨论"
-          description="课程页面、公告与讨论会出现在这里。"
-        />
+        <div className="flex h-full flex-col">
+          {syncError}
+          <EmptyState
+            icon={FileText}
+            title="暂无页面或讨论"
+            description="课程页面、公告与讨论会出现在这里。"
+          />
+        </div>
       );
     }
     return (
-      <div className="scroll-thin h-full overflow-y-auto">
+      <div className="flex h-full min-h-0 flex-col">
+        {syncError}
+        <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
         {pages.map((item) => (
           <button
             key={item.id}
@@ -647,6 +668,7 @@ export function CanvasPage() {
             <ChevronRight className="size-3.5 shrink-0 text-ink-3" />
           </button>
         ))}
+        </div>
       </div>
     );
   };
@@ -696,7 +718,7 @@ export function CanvasPage() {
               <div className="rounded-lg border border-line bg-surface-2 p-3 text-[0.68rem] text-ink-3">
                 <div>1. 打开 oc.sjtu.edu.cn，登录后进入账户设置。</div>
                 <div>2. 新建访问令牌，复制生成的字符串。</div>
-                <div>3. 粘贴到本应用；Token 会用 Windows DPAPI 加密保存在本机。</div>
+                <div>3. 粘贴到本应用；Token 会用 系统安全存储 加密保存在本机。</div>
               </div>
               <div className="flex items-center gap-2 pt-1">
                 <Button variant="primary" onClick={() => setTokenOpen(true)}>
@@ -923,7 +945,7 @@ export function CanvasPage() {
             autoFocus
           />
           <p className="mt-3 text-[0.68rem] leading-relaxed text-ink-3">
-            Token 使用 Windows DPAPI 加密，仅保存在本机。同步只读取课程资料、作业与页面，不会修改课程内容或提交作业。
+            Token 使用 系统安全存储 加密，仅保存在本机。同步只读取课程资料、作业与页面，不会修改课程内容或提交作业。
           </p>
         </DialogContent>
       </Dialog>

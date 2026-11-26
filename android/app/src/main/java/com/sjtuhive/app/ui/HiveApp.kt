@@ -47,6 +47,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 import androidx.compose.ui.platform.LocalLifecycleOwner
@@ -56,6 +57,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import android.webkit.WebView
@@ -71,10 +73,12 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.sjtuhive.app.data.CampusSession
 import com.sjtuhive.app.data.HiveCacheManager
+import com.sjtuhive.app.data.HiveBackgroundSync
 import com.sjtuhive.app.data.HiveNotifications
 import com.sjtuhive.app.data.HiveSession
 import com.sjtuhive.app.data.HiveThemePrefs
 import com.sjtuhive.app.data.HiveTestFeatures
+import com.sjtuhive.app.data.TodoReminders
 import com.sjtuhive.app.data.UpdateApi
 import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
@@ -116,6 +120,7 @@ fun HiveApp() {
     var bottomBarDocked by remember { mutableStateOf(HiveThemePrefs.bottomBarDocked(context)) }
     var blurRadius by remember { mutableStateOf(HiveThemePrefs.blurRadius(context)) }
     var blurAlpha by remember { mutableStateOf(HiveThemePrefs.blurAlpha(context)) }
+    var fontScale by remember { mutableStateOf(HiveThemePrefs.fontScale(context)) }
 
     val isDark = when (themeMode) {
         HiveThemePrefs.MODE_LIGHT -> false
@@ -140,8 +145,13 @@ fun HiveApp() {
         controller.isAppearanceLightNavigationBars = !isDark
     }
 
+    val baseDensity = LocalDensity.current
     CompositionLocalProvider(
         LocalIsDark provides isDark,
+        LocalDensity provides Density(
+            baseDensity.density,
+            baseDensity.fontScale * fontScale,
+        ),
         LocalAppUiConfiguration provides AppUiConfiguration(
             ThemeSettingsSnapshot(
                 bottomBarBlurRadius = blurRadius,
@@ -207,6 +217,11 @@ fun HiveApp() {
                     onBlurAlphaChange = { value ->
                         HiveThemePrefs.setBlurAlpha(context, value)
                         blurAlpha = value
+                    },
+                    fontScale = fontScale,
+                    onFontScaleChange = { value ->
+                        HiveThemePrefs.setFontScale(context, value)
+                        fontScale = value
                     },
                 )
             }
@@ -299,6 +314,8 @@ private fun HiveShell(
     blurAlpha: Int,
     onBlurRadiusChange: (Int) -> Unit,
     onBlurAlphaChange: (Int) -> Unit,
+    fontScale: Float,
+    onFontScaleChange: (Float) -> Unit,
 ) {
     var selectedId by remember { mutableStateOf(HiveTabId.Overview) }
     val context = LocalContext.current
@@ -359,6 +376,8 @@ private fun HiveShell(
             }
             HiveNotifications.schedule(context)
         }
+        TodoReminders.schedule(context)
+        HiveBackgroundSync.schedule(context)
     }
     var loginTarget by remember { mutableStateOf<LoginTarget?>(null) }
     var sessionVersion by remember { mutableIntStateOf(0) }
@@ -373,6 +392,7 @@ private fun HiveShell(
     var showExam by remember { mutableStateOf(false) }
     var showSearch by remember { mutableStateOf(false) }
     var showMessages by remember { mutableStateOf(false) }
+    var showNotifications by remember { mutableStateOf(false) }
     var servicesFullscreen by remember { mutableStateOf(false) }
     // 应用内深链：从链接（水源帖子/Canvas 课程等）跳进来时携带的初始目标
     var linkTopicId by remember { mutableStateOf<Long?>(null) }
@@ -390,6 +410,7 @@ private fun HiveShell(
             showCourseCommunity = false
             showShare = false
             showMessages = false
+            showNotifications = false
             showTodo = false
             showExam = false
             showSearch = false
@@ -496,6 +517,7 @@ private fun HiveShell(
                         onOpenTodo = { showTodo = true },
                         onOpenSearch = { showSearch = true },
                         onOpenMessages = { showMessages = true },
+                        onOpenNotifications = { showNotifications = true },
                         onOpenMail = { index ->
                             emailRequest = "INBOX" to index
                             showEmail = true
@@ -546,6 +568,8 @@ private fun HiveShell(
                         blurAlpha = blurAlpha,
                         onBlurRadiusChange = onBlurRadiusChange,
                         onBlurAlphaChange = onBlurAlphaChange,
+                        fontScale = fontScale,
+                        onFontScaleChange = onFontScaleChange,
                         servicesEnabled = servicesEnabled,
                         onServicesEnabledChange = { enabled ->
                             HiveTestFeatures.setServicesEnabled(context, enabled)
@@ -604,6 +628,7 @@ private fun HiveShell(
                 onOpenEmail = { showSearch = false; showEmail = true },
                 onOpenSchedule = { showSearch = false; selectedId = HiveTabId.Schedule },
                 onOpenTodo = { showSearch = false; showTodo = true },
+                onOpenSettings = { showSearch = false; selectedId = HiveTabId.Settings },
             )
         }
         if (showShare) {
@@ -619,6 +644,28 @@ private fun HiveShell(
                     showEmail = true
                 },
                 onClose = { showMessages = false },
+            )
+        }
+        if (showNotifications) {
+            NotificationCenterScreen(
+                context = context,
+                onClose = { showNotifications = false },
+                onOpen = { notice ->
+                    showNotifications = false
+                    when (notice.route) {
+                        "mail" -> {
+                            emailRequest = "INBOX" to (notice.mailIndex ?: 0)
+                            showEmail = true
+                        }
+                        "todo" -> showTodo = true
+                        "shuiyuan" -> {
+                            linkTopicId = notice.topicId
+                            showShuiyuan = true
+                        }
+                        "exam" -> selectedId = HiveTabId.Schedule
+                        else -> showMessages = true
+                    }
+                },
             )
         }
         if (showEmail) {
@@ -659,7 +706,8 @@ private fun HiveShell(
             }
         }
         if (loginTarget == null && !showShuiyuan && !showCanvas && !showEmail && !showClassroom &&
-            !showCourseCommunity && !showShare && !showMessages && !servicesFullscreen &&
+            !showCourseCommunity && !showShare && !showMessages && !showNotifications &&
+            !servicesFullscreen &&
             PreviewHost.request == null
         ) if (bottomBarDocked) {
             HiveDockedBar(

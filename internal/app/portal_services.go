@@ -434,9 +434,6 @@ func (s *PortalServices) Catalog(force bool) (ServiceCatalog, error) {
 			catalog.Apps = append(catalog.Apps, app)
 		}
 	}
-	if len(catalog.Apps) == 0 {
-		return ServiceCatalog{}, errors.New("交我办没有返回任何办事应用，可能是登录态失效，请重新登录教学网")
-	}
 	for _, raw := range categoryRaw {
 		if category, ok := parseServiceCategory(raw); ok {
 			catalog.Categories = append(catalog.Categories, category)

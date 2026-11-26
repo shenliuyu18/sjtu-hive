@@ -125,7 +125,7 @@ export function Onboarding() {
             <div className="selectable max-h-40 overflow-y-auto rounded-lg border border-line bg-surface-2 p-3 text-[0.68rem] leading-relaxed text-ink-3">
               使用本应用即表示你同意：本应用与上海交通大学无隶属关系；校园接口可能随学校系统调整；
               不提供自动选课、场馆预约或批量抢资源功能；重要笔记请自行备份。账号 Token、邮箱密码与 Cookie
-              使用 Windows DPAPI 加密保存在本机，不会上传到任何服务器。
+              使用 系统安全存储 加密保存在本机，不会上传到任何服务器。
             </div>
             <Checkbox
               checked={accepted}

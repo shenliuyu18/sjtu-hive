@@ -54,9 +54,11 @@
 
 **Windows 10/11 x64**：安装包会检查 WebView2，用户级 NSIS 安装不要求管理员权限；绿色版解压后直接运行 `SJTU-Hive.exe`。
 
+**macOS 11+（Universal，Apple Silicon / Intel）**：下载 `.dmg` 后把 `SJTU Hive.app` 拖入“应用程序”。当前构建为 ad-hoc 签名、未做 Apple 公证，首次打开请右键 →「打开」，或执行 `xattr -dr com.apple.quarantine /Applications/SJTU\ Hive.app`。
+
 **Android 13+（minSdk 33）**：安装 Release APK；应用内更新需允许「安装未知应用」。
 
-1. **jAccount**：在「设置 → 账户与连接」登录。桌面端会打开独立 Edge 配置窗口，登录成功后读取 `.sjtu.edu.cn` Cookie 并加密保存；日程、消息、办事大厅、云盘、课堂视频与传承交大复用该会话。
+1. **jAccount**：在「设置 → 账户与连接」登录。桌面端会打开独立的 Edge / Chrome 登录窗口，登录成功后读取 `.sjtu.edu.cn` Cookie 并加密保存；日程、消息、云盘、课堂视频与传承交大复用该会话。
 2. **校园邮箱**：填写邮箱地址与密码/授权码；交大邮箱默认 `mail.sjtu.edu.cn` IMAP 993 / SMTP 465，第三方邮箱可自定义服务器。
 3. **Canvas**：默认复用 jAccount；也可在 `oc.sjtu.edu.cn` 新建访问令牌后填入。
 4. **水源社区**：点击「登录并授权」，在授权页确认后把密文粘贴回应用；也支持 jAccount 回退。
@@ -66,9 +68,9 @@
 ## 数据与安全
 
 - 所有数据保存在本机；没有应用账号系统、遥测或云端中转。
-- Windows 凭据（邮箱密码、校园 Cookie、水源 Key、选课社区会话）使用 **Windows DPAPI** 加密；Android 校园会话保存在应用私有存储，邮箱密码等使用 AndroidKeyStore AES/GCM。
-- SQLite：`%APPDATA%\SJTU Hive\sjtu.db`；加密凭据：`%APPDATA%\SJTU Hive\secrets\`；日志：`%APPDATA%\SJTU Hive\logs\`。
-- 缓存：`%LOCALAPPDATA%\SJTU Hive\cache\`；更新包：`%LOCALAPPDATA%\SJTU Hive\updates\`；WebView2：`%LOCALAPPDATA%\SJTU Hive\EBWebView\`；Edge 校园登录配置：`%LOCALAPPDATA%\SJTU Hive\edge-campus\`。
+- Windows 凭据（邮箱密码、校园 Cookie、水源 Key、选课社区会话）使用 **Windows DPAPI** 加密；macOS 使用 **钥匙串（Keychain）** 主密钥 + AES-256-GCM；Android 校园会话保存在应用私有存储，邮箱密码等使用 AndroidKeyStore AES/GCM。
+- Windows 数据：SQLite `%APPDATA%\SJTU Hive\sjtu.db`，凭据 `%APPDATA%\SJTU Hive\secrets\`，日志 `%APPDATA%\SJTU Hive\logs\`，缓存 `%LOCALAPPDATA%\SJTU Hive\cache\`。
+- macOS 数据：`~/Library/Application Support/SJTU Hive`（数据库/凭据）、`~/Library/Caches/SJTU Hive`（缓存/浏览器登录）、`~/Library/Logs/SJTU Hive`（日志）；下载目录为 `~/Downloads`。
 - 默认项目目录：`文档\SJTU Notes`（首次启动创建；移除登记不会删除磁盘文件）。
 - 邮件与水源 HTML 在沙箱 iframe / DOMPurify 后渲染；外链交给系统浏览器；办理页只允许打开 `*.sjtu.edu.cn`。
 - 预览资源通过本机 `127.0.0.1` 随机端口与随机令牌提供；课堂视频走代理，Cookie 不暴露给渲染层。
@@ -85,6 +87,14 @@ go run github.com/wailsapp/wails/v2/cmd/wails@v2.16.0 build -platform windows/am
 go run github.com/wailsapp/wails/v2/cmd/wails@v2.16.0 build -platform windows/amd64 -nsis -installscope user -webview2 download
 go test ./... -count=1
 ```
+
+macOS 需在 macOS 本机构建（Cocoa/CGO 无法在 Windows 交叉生成可执行包），推荐用 CI：
+
+```sh
+go run github.com/wailsapp/wails/v2/cmd/wails@v2.16.0 build -platform darwin/universal
+```
+
+`.github/workflows/macos.yml` 会在 `macos-14` 上跑测试、构建 Universal `.app`、ad-hoc 签名并产出 `.dmg` / `.app.zip`；打 `v*` 标签时自动上传到对应 Release。
 
 前端可单独预览：`cd frontend && npm install && npm run dev`；浏览器模式下由 `src/lib/mock.ts` 提供演示数据。
 
@@ -115,7 +125,7 @@ node tools/sync-version.mjs --check      # 只校验（CI 使用）
 node tools/release.mjs
 ```
 
-脚本依次做：校验版本号 → 构建前端 → 跑 Go 测试 → 构建 Windows 绿色版 ZIP → 构建 NSIS 安装包 → 构建 Android 签名 APK → 计算 SHA-256。产物在 `dist/`，文件名与 `site/index.html` 的下载链接一一对应。安装包需要 NSIS（`winget install --id NSIS.NSIS -e`），没有时可加 `--skip-installer`；只出某一端用 `--skip-android` / `--skip-windows`。
+脚本依次做：校验版本号 → 构建前端 → 跑 Go 测试 → 构建 Windows 绿色版 ZIP → 构建 NSIS 安装包 → 构建 Android 签名 APK → 计算 SHA-256。产物在 `dist/`，文件名与 `site/index.html` 的下载链接一一对应。安装包需要 NSIS（`winget install --id NSIS.NSIS -e`），没有时可加 `--skip-installer`；只出某一端用 `--skip-android` / `--skip-windows`。macOS 产物由上面的 `macos.yml` 单独构建。
 
 版本约定：对外只发布稳定的 `x.y.z` 版本；开发构建使用递增的预发布号，仅在本地使用。Android 的 `versionCode` 由版本号推导（`1.3.2` → `10302`），不需要手改；它必须单调递增，否则老用户无法覆盖安装。
 
@@ -124,7 +134,8 @@ node tools/release.mjs
 - 校园接口属于学校内部服务，可能随时调整；接口变化时相关模块可能暂时不可用。
 - 交我办消息、办事大厅与云盘依赖 jAccount 会话；会话过期时先静默续期，jAccount 本身过期后需重新登录。云盘 `user_token` 有效期 30 天，`access_token` 约 30 分钟自动续取。
 - 云盘上传续传依赖服务端 `confirmKey`；服务端会话过期后需从头上传该文件。Android 传输队列在进程被杀后标记为暂停，不提供前台服务常驻下载。
-- 办事大厅是测试功能，默认关闭；办理页由学校页面自身渲染，少数表单的弹窗、外部下载等行为取决于页面实现，应用只允许打开交大域名。
+- 办事大厅是测试功能，默认关闭；办理页由学校页面自身渲染，少数表单的弹窗、外部下载等行为取决于页面实现，应用只允许打开交大域名。macOS 暂不提供办事大厅内嵌窗口，入口会隐藏。
+- macOS 版为 ad-hoc 签名、未公证；首次打开需右键「打开」。关闭窗口会收起到菜单栏，点击菜单栏图标恢复，菜单里可退出。
 - 日程来自交我办日历，本地日程不写回学校系统。教学网课表同步已下线，课程数据以交我办日历为准。
 - 桌面端单窗口、单标签组，固定快捷键，不支持自定义键位。
 - 旧版 Office 为只读轻量渲染，复杂排版、宏与嵌入对象可能丢失；PPTX 只呈现静态页面，不播放切换动画。

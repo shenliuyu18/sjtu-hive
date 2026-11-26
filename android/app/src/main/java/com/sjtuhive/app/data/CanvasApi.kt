@@ -9,6 +9,9 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 
+/** Canvas 未开放该课程内容（403/404），不等于登录失效。 */
+class CanvasAccessException(message: String) : Exception(message)
+
 data class CanvasCourse(
     val id: Long,
     val name: String,
@@ -119,7 +122,7 @@ class CanvasApi(private val context: Context) {
         } ?: emptyList()
 
     suspend fun courses(): List<CanvasCourse> = withContext(Dispatchers.IO) {
-        val body = get("/courses?enrollment_state=active&per_page=100&include[]=term")
+        val body = getList("/courses?enrollment_state=active&per_page=100&include[]=term")
         HiveCache.putString(context, "canvas:courses", body)
         parseCourses(body)
     }
@@ -142,7 +145,7 @@ class CanvasApi(private val context: Context) {
     }
 
     suspend fun files(courseId: Long): List<CanvasFile> = withContext(Dispatchers.IO) {
-        val body = get("/courses/$courseId/files?per_page=100&sort=name&order=asc")
+        val body = getList("/courses/$courseId/files?per_page=100&sort=name&order=asc")
         HiveCache.putString(context, "canvas:files:$courseId", body)
         parseFiles(body)
     }
@@ -203,7 +206,7 @@ class CanvasApi(private val context: Context) {
     }
 
     suspend fun assignments(courseId: Long): List<CanvasAssignment> = withContext(Dispatchers.IO) {
-        val array = JSONArray(get("/courses/$courseId/assignments?per_page=100&order_by=due_at"))
+        val array = JSONArray(getList("/courses/$courseId/assignments?per_page=100&order_by=due_at"))
         (0 until array.length()).mapNotNull { index ->
             val item = array.optJSONObject(index) ?: return@mapNotNull null
             val name = item.text("name")
@@ -220,7 +223,7 @@ class CanvasApi(private val context: Context) {
 
     suspend fun announcements(courseId: Long): List<CanvasAnnouncement> = withContext(Dispatchers.IO) {
         val array = JSONArray(
-            get("/courses/$courseId/discussion_topics?only_announcements=true&per_page=50"),
+            getList("/courses/$courseId/discussion_topics?only_announcements=true&per_page=50"),
         )
         (0 until array.length()).mapNotNull { index ->
             val item = array.optJSONObject(index) ?: return@mapNotNull null
@@ -237,7 +240,7 @@ class CanvasApi(private val context: Context) {
 
     /** 课程页面（Pages）：列表与正文。 */
     suspend fun pages(courseId: Long): List<CanvasPage> = withContext(Dispatchers.IO) {
-        val array = JSONArray(get("/courses/$courseId/pages?per_page=100&sort=title"))
+        val array = JSONArray(getList("/courses/$courseId/pages?per_page=100&sort=title"))
         (0 until array.length()).mapNotNull { index ->
             val item = array.optJSONObject(index) ?: return@mapNotNull null
             val url = item.text("url")
@@ -257,7 +260,7 @@ class CanvasApi(private val context: Context) {
 
     /** 课程讨论（Discussion Topics）：列表与正文。 */
     suspend fun discussions(courseId: Long): List<CanvasDiscussion> = withContext(Dispatchers.IO) {
-        val array = JSONArray(get("/courses/$courseId/discussion_topics?per_page=100"))
+        val array = JSONArray(getList("/courses/$courseId/discussion_topics?per_page=100"))
         (0 until array.length()).mapNotNull { index ->
             val item = array.optJSONObject(index) ?: return@mapNotNull null
             val title = item.text("title")
@@ -278,7 +281,7 @@ class CanvasApi(private val context: Context) {
     }
 
     suspend fun modules(courseId: Long): List<CanvasModule> = withContext(Dispatchers.IO) {
-        val array = JSONArray(get("/courses/$courseId/modules?include[]=items&per_page=100"))
+        val array = JSONArray(getList("/courses/$courseId/modules?include[]=items&per_page=100"))
         (0 until array.length()).mapNotNull { index ->
             val item = array.optJSONObject(index) ?: return@mapNotNull null
             val name = item.text("name")
@@ -334,6 +337,7 @@ class CanvasApi(private val context: Context) {
             "https://oc.sjtu.edu.cn/",
             headers = if (current.isEmpty()) emptyMap() else mapOf("Authorization" to "Bearer $current"),
         )
+        if (result.code == 404) throw CanvasAccessException("Canvas 资源不存在或无访问权限")
         if (result.code == 401 || result.code == 403) {
             // Canvas 会话过期但 jAccount 仍有效时，静默走一次 SSO 换新会话再试一次；
             // 只有重试仍然失败才报登录失效，避免「无内容/会话过期」被误报成未登录。
@@ -349,11 +353,22 @@ class CanvasApi(private val context: Context) {
                     headers = if (fresh.isEmpty()) emptyMap() else mapOf("Authorization" to "Bearer $fresh"),
                 )
                 if (retry.code in 200..299) return retry.body
+                if (retry.code == 403 || retry.code == 404) {
+                    throw CanvasAccessException("没有访问权限（课程可能未开放该内容）")
+                }
             }
+            if (result.code == 403) throw CanvasAccessException("没有访问权限（课程可能未开放该内容）")
             throw CampusAuthException("Canvas 登录已失效，请先在设置中重新登录 jAccount")
         }
         if (result.code !in 200..299) error("Canvas 返回 HTTP ${result.code}")
         return result.body
+    }
+
+    /** 课程未开放某类内容时 Canvas 返回 403/404，按空列表处理而不是报登录失效。 */
+    private suspend fun getList(path: String): String = try {
+        get(path)
+    } catch (_: CanvasAccessException) {
+        "[]"
     }
 
     companion object {

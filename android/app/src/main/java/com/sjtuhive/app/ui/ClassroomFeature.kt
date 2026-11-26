@@ -2,7 +2,10 @@ package com.sjtuhive.app.ui
 
 import android.media.MediaPlayer
 import android.app.Activity
+import android.app.DownloadManager
+import android.content.Context
 import android.content.ContextWrapper
+import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.graphics.SurfaceTexture
 import android.net.Uri
@@ -53,7 +56,9 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -64,6 +69,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -92,6 +98,9 @@ import com.kyant.backdrop.effects.vibrancy
 import com.kyant.backdrop.highlight.Highlight
 import com.kyant.backdrop.shadow.Shadow
 import com.sjtuhive.app.data.ClassroomApi
+import com.sjtuhive.app.data.ClassroomDownloads
+import com.sjtuhive.app.data.VideoDownloadState
+import com.sjtuhive.app.data.VideoDownloadTask
 import kotlin.math.roundToInt
 import com.sjtuhive.app.data.CampusSession
 import com.sjtuhive.app.data.ClassroomStream
@@ -104,7 +113,9 @@ import com.sjtuhive.app.data.HiveSession
 import com.sjtuhive.app.data.TranscriptSegment
 import com.sjtuhive.app.data.VideoCourse
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
+import java.io.File
 import kotlin.coroutines.resume
 
 private const val VIDEO_HOME = "https://v.sjtu.edu.cn/jy-application-resourcemanage-ui/"
@@ -154,12 +165,15 @@ fun ClassroomScreen(context: android.content.Context, onClose: () -> Unit) {
     var connected by remember { mutableStateOf(false) }
     var showLogin by remember { mutableStateOf(false) }
     var courses by remember { mutableStateOf<List<VideoCourse>>(emptyList()) }
+    var courseQuery by remember { mutableStateOf("") }
     var course by remember { mutableStateOf<VideoCourse?>(null) }
     var videos by remember { mutableStateOf<List<ClassroomVideo>>(emptyList()) }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var reload by remember { mutableIntStateOf(0) }
     var playing by remember { mutableStateOf<ClassroomVideo?>(null) }
+    var showDownloads by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
     var loginWebView by remember { mutableStateOf<WebView?>(null) }
 
     var autoRefreshTried by remember { mutableStateOf(false) }
@@ -211,6 +225,7 @@ fun ClassroomScreen(context: android.content.Context, onClose: () -> Unit) {
 
     BackHandler {
         when {
+            showDownloads -> showDownloads = false
             playing != null -> playing = null
             course != null -> course = null
             else -> onClose()
@@ -247,7 +262,10 @@ fun ClassroomScreen(context: android.content.Context, onClose: () -> Unit) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                if (connected) TextButton(onClick = { reload++ }, enabled = !loading) { Text("刷新") }
+                if (connected) {
+                    TextButton(onClick = { showDownloads = true }) { Text("下载") }
+                    TextButton(onClick = { reload++ }, enabled = !loading) { Text("刷新") }
+                }
             }
 
             when {
@@ -286,7 +304,25 @@ fun ClassroomScreen(context: android.content.Context, onClose: () -> Unit) {
                         }
                     }
                     if (course == null) {
-                        items(courses, key = { it.id }) { item ->
+                        item {
+                            OutlinedTextField(
+                                value = courseQuery,
+                                onValueChange = { courseQuery = it },
+                                placeholder = { Text("搜索课程名或代码") },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+                        }
+                        val lower = courseQuery.trim().lowercase()
+                        val visible = if (lower.isEmpty()) {
+                            courses
+                        } else {
+                            courses.filter {
+                                it.name.lowercase().contains(lower) ||
+                                    it.code.lowercase().contains(lower)
+                            }
+                        }
+                        items(visible, key = { it.id }) { item ->
                             Column(
                                 Modifier
                                     .fillMaxWidth()
@@ -306,36 +342,93 @@ fun ClassroomScreen(context: android.content.Context, onClose: () -> Unit) {
                                 }
                             }
                         }
-                        if (courses.isEmpty() && error == null) {
-                            item { Text("本学期没有录像课程。", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                        if (visible.isEmpty() && error == null) {
+                            item {
+                                Text(
+                                    if (courseQuery.isBlank()) {
+                                        "本学期没有录像课程。"
+                                    } else {
+                                        "没有匹配的课程。"
+                                    },
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
                         }
                     } else {
                         items(videos, key = { it.id }) { video ->
-                            Column(
+                            Row(
                                 Modifier
                                     .fillMaxWidth()
                                     .clip(RoundedCornerShape(16.dp))
                                     .background(MaterialTheme.colorScheme.surface)
-                                    .clickable {
-                                        error = null
-                                        playing = video
-                                    }
                                     .padding(14.dp),
-                                verticalArrangement = Arrangement.spacedBy(3.dp),
+                                verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                Text(
-                                    listOf(video.start, video.end)
-                                        .filter { it.isNotBlank() }
-                                        .joinToString(" – ")
-                                        .ifBlank { "录像 ${video.id}" },
-                                    style = MaterialTheme.typography.titleSmall,
-                                )
-                                Text(
-                                    listOf(video.room, if (video.period.isNotBlank()) "第 ${video.period} 节" else "")
-                                        .filter { it.isNotBlank() }.joinToString(" · "),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
+                                Column(
+                                    Modifier
+                                        .weight(1f)
+                                        .clickable {
+                                            error = null
+                                            playing = video
+                                        },
+                                    verticalArrangement = Arrangement.spacedBy(3.dp),
+                                ) {
+                                    Text(
+                                        listOf(video.start, video.end)
+                                            .filter { it.isNotBlank() }
+                                            .joinToString(" – ")
+                                            .ifBlank { "录像 ${video.id}" },
+                                        style = MaterialTheme.typography.titleSmall,
+                                    )
+                                    Text(
+                                        listOf(
+                                            video.room,
+                                            if (video.period.isNotBlank()) "第 ${video.period} 节" else "",
+                                        )
+                                            .filter { it.isNotBlank() }
+                                            .joinToString(" · "),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                                TextButton(onClick = {
+                                    scope.launch {
+                                        runCatching { api.streams(video.id) }
+                                            .onSuccess { list ->
+                                                val url = list.firstOrNull()?.url.orEmpty()
+                                                if (url.isBlank()) {
+                                                    Toast.makeText(
+                                                        context,
+                                                        "没有可下载的播放地址",
+                                                        Toast.LENGTH_SHORT,
+                                                    ).show()
+                                                } else {
+                                                    val label = listOf(video.start, video.end)
+                                                        .filter { it.isNotBlank() }
+                                                        .joinToString("–")
+                                                        .ifBlank { "课堂录像" }
+                                                    ClassroomDownloads.enqueue(
+                                                        context,
+                                                        video.id,
+                                                        label,
+                                                        url,
+                                                    )
+                                                    Toast.makeText(
+                                                        context,
+                                                        "已加入下载队列",
+                                                        Toast.LENGTH_SHORT,
+                                                    ).show()
+                                                }
+                                            }
+                                            .onFailure {
+                                                Toast.makeText(
+                                                    context,
+                                                    it.message ?: "下载地址读取失败",
+                                                    Toast.LENGTH_SHORT,
+                                                ).show()
+                                            }
+                                    }
+                                }) { Text("下载") }
                             }
                         }
                         if (videos.isEmpty() && error == null) {
@@ -383,6 +476,13 @@ fun ClassroomScreen(context: android.content.Context, onClose: () -> Unit) {
             }
         }
 
+        if (showDownloads) {
+            ClassroomDownloadsScreen(
+                context = context,
+                onBack = { showDownloads = false },
+            )
+        }
+
         playing?.let { video ->
             VideoPlayerScreen(
                 context = context,
@@ -392,6 +492,122 @@ fun ClassroomScreen(context: android.content.Context, onClose: () -> Unit) {
             )
         }
     }
+}
+
+@Composable
+private fun ClassroomDownloadsScreen(context: android.content.Context, onBack: () -> Unit) {
+    val tasks = ClassroomDownloads.tasks
+    BackHandler { onBack() }
+    Column(
+        Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background),
+    ) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(start = 8.dp, end = 8.dp, top = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TextButton(onClick = onBack) { Text("← 返回") }
+            Text(
+                "课堂下载",
+                style = MaterialTheme.typography.titleLarge,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(
+                enabled = tasks.any {
+                    it.state == VideoDownloadState.DONE ||
+                        it.state == VideoDownloadState.FAILED ||
+                        it.state == VideoDownloadState.CANCELED
+                },
+                onClick = { ClassroomDownloads.removeFinished() },
+            ) { Text("清除已完成") }
+            TextButton(onClick = {
+                runCatching {
+                    context.startActivity(
+                        Intent(DownloadManager.ACTION_VIEW_DOWNLOADS)
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                    )
+                }
+            }) { Text("下载目录") }
+        }
+        if (tasks.isEmpty()) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("没有下载任务", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            return@Column
+        }
+        LazyColumn(
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 40.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            items(tasks, key = { it.id }) { task ->
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(MaterialTheme.colorScheme.surface)
+                        .padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Text(task.title, style = MaterialTheme.typography.titleSmall)
+                    LinearProgressIndicator(
+                        progress = { task.progress / 100f },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    val status = when (task.state) {
+                        VideoDownloadState.QUEUED -> "等待中"
+                        VideoDownloadState.DOWNLOADING ->
+                            "${task.progress}% · ${formatBytes(task.downloaded)} / ${formatBytes(task.total)}"
+                        VideoDownloadState.PAUSED -> "已暂停"
+                        VideoDownloadState.DONE -> "已完成，保存在系统下载目录"
+                        VideoDownloadState.FAILED -> "失败：${task.error.orEmpty()}"
+                        VideoDownloadState.CANCELED -> "已取消"
+                    }
+                    Text(
+                        status,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (task.state == VideoDownloadState.FAILED) {
+                            MaterialTheme.colorScheme.error
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        if (task.state == VideoDownloadState.DOWNLOADING ||
+                            task.state == VideoDownloadState.QUEUED
+                        ) {
+                            TextButton(onClick = { ClassroomDownloads.pause(task.id) }) {
+                                Text("暂停")
+                            }
+                        }
+                        if (task.state == VideoDownloadState.PAUSED ||
+                            task.state == VideoDownloadState.FAILED
+                        ) {
+                            TextButton(onClick = { ClassroomDownloads.resume(context, task.id) }) {
+                                Text("继续")
+                            }
+                        }
+                        if (task.state != VideoDownloadState.DONE &&
+                            task.state != VideoDownloadState.CANCELED
+                        ) {
+                            TextButton(onClick = { ClassroomDownloads.cancel(task.id) }) {
+                                Text("取消")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun formatBytes(value: Long): String = when {
+    value <= 0 -> "0 B"
+    value < 1024 -> "$value B"
+    value < 1024 * 1024 -> "%.0f KB".format(value / 1024.0)
+    else -> "%.1f MB".format(value / 1024.0 / 1024.0)
 }
 
 @Composable
@@ -413,6 +629,7 @@ private fun VideoPlayerScreen(
     var transcript by remember { mutableStateOf<List<TranscriptSegment>>(emptyList()) }
     var transcriptLoading by remember { mutableStateOf(false) }
     var transcriptError by remember { mutableStateOf<String?>(null) }
+    var pendingSeek by remember(video.id) { mutableStateOf<Long?>(null) }
 
     val activity = context.findActivity()
     // 退出播放器时系统栏图标要回到当前主题的深浅（全屏期间系统可能改写）。
@@ -483,6 +700,12 @@ private fun VideoPlayerScreen(
             segments = transcript,
             loading = transcriptLoading,
             error = transcriptError,
+            videoId = video.id,
+            title = title,
+            onSeek = { positionMs ->
+                pendingSeek = positionMs
+                showTranscript = false
+            },
             onBack = { showTranscript = false },
         )
         return
@@ -512,6 +735,8 @@ private fun VideoPlayerScreen(
                     interactionTick++
                 },
                 onInteraction = { touched() },
+                startPositionMs = pendingSeek,
+                onSeekConsumed = { pendingSeek = null },
                 onPlayingChanged = { playingNow ->
                     primaryPlaying = playingNow
                     if (!playingNow) controlsVisible = true
@@ -602,8 +827,14 @@ private fun TranscriptPanel(
     segments: List<TranscriptSegment>,
     loading: Boolean,
     error: String?,
+    videoId: Long,
+    title: String,
+    onSeek: (Long) -> Unit,
     onBack: () -> Unit,
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
+    var exporting by remember { mutableStateOf(false) }
     BackHandler { onBack() }
     Column(
         Modifier
@@ -624,6 +855,31 @@ private fun TranscriptPanel(
                 style = MaterialTheme.typography.titleMedium,
                 modifier = Modifier.weight(1f),
             )
+            TextButton(
+                enabled = !exporting && segments.isNotEmpty(),
+                onClick = {
+                    exporting = true
+                    scope.launch {
+                        runCatching {
+                            val text = segments.joinToString("\n") { segment ->
+                                "${formatClock(segment.startMs)} ${segment.text}"
+                            }
+                            val file = File(context.cacheDir, "classroom-transcript-$videoId.txt")
+                            file.writeText(text)
+                            saveToDownloads(context, file, "课堂文稿_$videoId.txt")
+                        }.onSuccess {
+                            Toast.makeText(context, "已导出到下载目录", Toast.LENGTH_SHORT).show()
+                        }.onFailure {
+                            Toast.makeText(
+                                context,
+                                it.message ?: "导出失败",
+                                Toast.LENGTH_SHORT,
+                            ).show()
+                        }
+                        exporting = false
+                    }
+                },
+            ) { Text(if (exporting) "导出中" else "导出") }
         }
         when {
             loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -649,7 +905,14 @@ private fun TranscriptPanel(
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 items(segments, key = { "${it.startMs}-${it.text.hashCode()}" }) { segment ->
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable { onSeek(segment.startMs) }
+                            .padding(horizontal = 6.dp, vertical = 6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
                         Text(
                             formatClock(segment.startMs),
                             color = MaterialTheme.colorScheme.primary,
@@ -686,10 +949,17 @@ private fun VideoStage(
     onToggleControls: () -> Unit,
     onInteraction: () -> Unit,
     onPlayingChanged: (Boolean) -> Unit,
+    startPositionMs: Long? = null,
+    onSeekConsumed: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val progressStore = remember { ClassroomApi(context) }
-    val initialPosition = remember(videoId) { progressStore.progress(videoId) }
+    val initialPosition = remember(videoId) {
+        startPositionMs ?: progressStore.progress(videoId)
+    }
+    LaunchedEffect(startPositionMs) {
+        if (startPositionMs != null) onSeekConsumed()
+    }
     val primarySlot = remember { PlayerSlot() }
     val secondarySlot = remember { PlayerSlot() }
     var playing by remember { mutableStateOf(false) }

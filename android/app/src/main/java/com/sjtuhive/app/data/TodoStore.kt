@@ -13,7 +13,19 @@ data class TodoItem(
     val note: String,
     val done: Boolean,
     val source: String,
-)
+    val calendarEventId: String? = null,
+    val notified: Boolean = false,
+) {
+    /** 截止时间：带时间按原值，只有日期时按当天 09:00 处理。 */
+    fun dueDateTime(): java.time.LocalDateTime? = runCatching {
+        val text = dueAt.trim()
+        when {
+            text.isEmpty() -> null
+            text.contains('T') -> java.time.LocalDateTime.parse(text.take(19))
+            else -> java.time.LocalDate.parse(text.take(10)).atTime(9, 0)
+        }
+    }.getOrNull()
+}
 
 /**
  * 本地待办：JSON 落盘（filesDir/todo.json），与桌面端的 todo 模块对应。
@@ -43,6 +55,26 @@ class TodoStore(context: Context) {
 
     fun toggle(id: String) {
         write(read().map { if (it.id == id) it.copy(done = !it.done) else it })
+    }
+
+    fun update(id: String, title: String, dueAt: String, note: String) {
+        write(
+            read().map {
+                if (it.id == id) {
+                    it.copy(title = title.trim(), dueAt = dueAt.trim(), note = note.trim())
+                } else {
+                    it
+                }
+            },
+        )
+    }
+
+    fun setCalendarEvent(id: String, eventId: String?) {
+        write(read().map { if (it.id == id) it.copy(calendarEventId = eventId) else it })
+    }
+
+    fun markNotified(id: String) {
+        write(read().map { if (it.id == id) it.copy(notified = true) else it })
     }
 
     fun remove(id: String) {
@@ -78,6 +110,8 @@ class TodoStore(context: Context) {
                         note = obj.optString("note"),
                         done = obj.optBoolean("done"),
                         source = obj.optString("source", "local"),
+                        calendarEventId = obj.optString("calendarEventId").takeIf { it.isNotBlank() },
+                        notified = obj.optBoolean("notified"),
                     )
                 }?.takeIf { it.id.isNotBlank() }
             }
@@ -94,7 +128,9 @@ class TodoStore(context: Context) {
                     .put("dueAt", item.dueAt)
                     .put("note", item.note)
                     .put("done", item.done)
-                    .put("source", item.source),
+                    .put("source", item.source)
+                    .put("calendarEventId", item.calendarEventId.orEmpty())
+                    .put("notified", item.notified),
             )
         }
         runCatching {

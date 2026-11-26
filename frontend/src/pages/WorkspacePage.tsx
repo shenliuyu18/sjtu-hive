@@ -444,7 +444,7 @@ export function WorkspacePage() {
 
   const deleteEntry = async (entry: FileEntry) => {
     if (!project) return;
-    if (!window.confirm(`删除「${entry.name}」？文件会移入 Windows 回收站。`)) return;
+    if (!window.confirm(`删除「${entry.name}」？文件会移入系统回收站。`)) return;
     try {
       await call('workspace.delete', entry.path);
       setTabs((current) =>
@@ -597,7 +597,7 @@ export function WorkspacePage() {
                           void call('workspace.openProjectDirectory', project.id, 'explorer')
                         }
                       >
-                        在资源管理器中打开
+                        在文件管理器中打开
                       </DropdownItem>
                       <DropdownItem icon={X} danger onSelect={() => void removeProject()}>
                         移除项目

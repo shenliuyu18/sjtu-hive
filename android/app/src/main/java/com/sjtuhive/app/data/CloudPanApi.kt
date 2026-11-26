@@ -717,13 +717,24 @@ class CloudPanApi(private val context: Context) {
             origin = ORIGIN,
             jsonBody = if (post) "{}" else null,
         )
-        if (result.code == 401 || result.code == 403) throw CampusAuthException("请先登录 jAccount")
+        if (result.code == 401) throw CampusAuthException("请先登录 jAccount")
+        if (result.code == 403) {
+            val message = runCatching { JSONObject(result.body).text("message") }.getOrNull().orEmpty()
+            if (message.contains("登录") || message.contains("token", ignoreCase = true)) {
+                throw CampusAuthException("请先登录 jAccount")
+            }
+            error(message.ifBlank { "云盘拒绝访问（可能是文件权限或会话已更新）" })
+        }
         if (result.code !in 200..299) {
             val message = runCatching { JSONObject(result.body).text("message") }.getOrNull().orEmpty()
             error(message.ifBlank { "交大云盘返回 HTTP ${result.code}" })
         }
+        if (result.body.isBlank()) return JSONObject()
         return runCatching { JSONObject(result.body) }.getOrElse {
-            throw CampusAuthException("云盘登录状态异常，请重新登录")
+            if (result.body.contains("<html", ignoreCase = true)) {
+                throw CampusAuthException("云盘登录状态异常，请重新登录")
+            }
+            error("云盘返回的数据无法识别")
         }
     }
 

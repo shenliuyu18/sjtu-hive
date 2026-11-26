@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/url"
@@ -12,8 +13,8 @@ import (
 	"path/filepath"
 	goruntime "runtime"
 	"strings"
-	"sync/atomic"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
@@ -35,8 +36,11 @@ type AppInfo struct {
 }
 
 type App struct {
-	ctx              context.Context
-	cancel           context.CancelFunc
+	ctx    context.Context
+	cancel context.CancelFunc
+	// ready 在 Startup 结束后关闭。Wails 的 OnStartup 跑在 goroutine 里，
+	// WebView 可能先加载并调用绑定方法，这里让这些调用等到路由注册完再执行。
+	ready chan struct{}
 	// 前端挂载信号：用于启动看门狗判断 WebView 是否真的把页面跑起来了。
 	frontendMounted  chan struct{}
 	mountedOnce      sync.Once
@@ -75,10 +79,11 @@ type App struct {
 }
 
 func NewApp() *App {
-	return &App{started: time.Now()}
+	return &App{started: time.Now(), ready: make(chan struct{})}
 }
 
 func (a *App) Startup(ctx context.Context) {
+	defer close(a.ready)
 	a.ctx = ctx
 	a.ctx, a.cancel = context.WithCancel(ctx)
 	a.frontendMounted = make(chan struct{})
@@ -220,12 +225,16 @@ func (a *App) PreventClose() bool {
 	if a.settings.State().CloseAction != "tray" {
 		return false
 	}
+	// 没有系统托盘（例如 macOS 当前版本）时隐藏窗口将无法恢复，直接按退出处理。
+	if a.tray == nil {
+		return false
+	}
 	if a.ctx == nil {
 		return false
 	}
 	wruntime.WindowHide(a.ctx)
 	if a.tray != nil && !a.trayHintShown.Swap(true) {
-		_ = systemToast(AppName+" 已在后台运行", "点击托盘图标恢复窗口，右键托盘图标可退出。")
+		_ = systemToast(AppName+" 已在后台运行", "点击系统托盘 / 菜单栏图标恢复窗口，右键或菜单可退出。")
 	}
 	return true
 }
@@ -506,7 +515,7 @@ func (a *App) registerServices() {
 			hideConsoleWindow(command)
 			return true, command.Start()
 		}
-		return true, exec.Command("explorer.exe", project.Path).Start()
+		return true, openDirectory(project.Path)
 	})
 	a.router.Handle("workspace.openFile", func(args []json.RawMessage) (any, error) {
 		pathValue, err := DecodeArg[string](args, 0)
@@ -516,7 +525,7 @@ func (a *App) registerServices() {
 		if _, err := os.Stat(pathValue); err != nil {
 			return nil, fmt.Errorf("文件不存在")
 		}
-		return true, exec.Command("rundll32.exe", "url.dll,FileProtocolHandler", pathValue).Start()
+		return true, openTarget(pathValue)
 	})
 	a.router.Handle("workspace.showInFolder", func(args []json.RawMessage) (any, error) {
 		pathValue, err := DecodeArg[string](args, 0)
@@ -528,9 +537,9 @@ func (a *App) registerServices() {
 			return nil, fmt.Errorf("路径不存在")
 		}
 		if info.IsDir() {
-			return true, exec.Command("explorer.exe", pathValue).Start()
+			return true, openDirectory(pathValue)
 		}
-		return true, exec.Command("explorer.exe", "/select,"+pathValue).Start()
+		return true, revealTarget(pathValue)
 	})
 }
 
@@ -580,8 +589,18 @@ func (a *App) emit(name string, data any) {
 }
 
 func (a *App) Call(channel, argsJSON string) (string, error) {
+	if a.ready != nil {
+		select {
+		case <-a.ready:
+		case <-time.After(30 * time.Second):
+			return "", errors.New("应用初始化超时，请重启应用")
+		}
+	}
 	if a.startErr != nil {
 		return "", a.startErr
+	}
+	if a.router == nil {
+		return "", errors.New("应用尚未初始化完成")
 	}
 	args := make([]json.RawMessage, 0)
 	if strings.TrimSpace(argsJSON) != "" && argsJSON != "null" {
@@ -658,9 +677,9 @@ func (a *App) registerCore() {
 			return nil, fmt.Errorf("路径不存在")
 		}
 		if info, err := os.Stat(pathValue); err == nil && info.IsDir() {
-			return true, exec.Command("explorer.exe", pathValue).Start()
+			return true, openDirectory(pathValue)
 		}
-		return true, exec.Command("rundll32.exe", "url.dll,FileProtocolHandler", pathValue).Start()
+		return true, openTarget(pathValue)
 	})
 	a.router.Handle("app.showInFolder", func(args []json.RawMessage) (any, error) {
 		pathValue, err := DecodeArg[string](args, 0)
@@ -672,9 +691,9 @@ func (a *App) registerCore() {
 			return nil, fmt.Errorf("路径不存在")
 		}
 		if info.IsDir() {
-			return true, exec.Command("explorer.exe", pathValue).Start()
+			return true, openDirectory(pathValue)
 		}
-		return true, exec.Command("explorer.exe", "/select,"+pathValue).Start()
+		return true, revealTarget(pathValue)
 	})
 	a.router.Handle("app.chooseDirectory", func(args []json.RawMessage) (any, error) {
 		title, _, _ := DecodeOptionalArg[string](args, 0)
@@ -708,10 +727,10 @@ func (a *App) registerCore() {
 		return wruntime.SaveFileDialog(a.ctx, options)
 	})
 	a.router.Handle("app.openLogs", func([]json.RawMessage) (any, error) {
-		return true, exec.Command("explorer.exe", a.paths.LogDir).Start()
+		return true, openDirectory(a.paths.LogDir)
 	})
 	a.router.Handle("app.openData", func([]json.RawMessage) (any, error) {
-		return true, exec.Command("explorer.exe", a.paths.DataDir).Start()
+		return true, openDirectory(a.paths.DataDir)
 	})
 	a.router.Handle("app.quit", func([]json.RawMessage) (any, error) {
 		a.QuitApp()

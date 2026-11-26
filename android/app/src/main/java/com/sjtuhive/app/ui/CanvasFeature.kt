@@ -120,6 +120,21 @@ fun CanvasScreen(
     var exporting by remember { mutableStateOf(false) }
     var reading by remember { mutableStateOf<CanvasDoc?>(null) }
     var opening by remember { mutableStateOf(false) }
+    var courseQuery by remember { mutableStateOf("") }
+    var showArchived by remember { mutableStateOf(false) }
+    val archivePrefs = remember {
+        context.getSharedPreferences("hive_canvas_archive", Context.MODE_PRIVATE)
+    }
+    var archivedIds by remember {
+        mutableStateOf(archivePrefs.getStringSet("ids", emptySet()).orEmpty())
+    }
+
+    fun toggleArchive(id: Long) {
+        val key = id.toString()
+        val next = if (key in archivedIds) archivedIds - key else archivedIds + key
+        archivedIds = next
+        archivePrefs.edit().putStringSet("ids", next).apply()
+    }
     val scope = rememberCoroutineScope()
 
     // 深链：链接指向某门 Canvas 课程时，列表就绪后直接进入该课程
@@ -292,6 +307,28 @@ fun CanvasScreen(
                     }
                 }
             }
+            if (course == null) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    OutlinedTextField(
+                        value = courseQuery,
+                        onValueChange = { courseQuery = it },
+                        placeholder = { Text("搜索课程名或代码") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                    )
+                    FilterChip(
+                        selected = showArchived,
+                        onClick = { showArchived = !showArchived },
+                        label = { Text(if (showArchived) "归档" else "进行中") },
+                    )
+                }
+            }
             LazyColumn(
                 contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 40.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -309,29 +346,67 @@ fun CanvasScreen(
                     }
                 }
                 if (course == null) {
-                    items(courses, key = { it.id }) { item ->
-                        Column(
-                            Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(18.dp))
-                                .background(MaterialTheme.colorScheme.surface)
-                                .clickable {
-                                    course = item
-                                    section = "files"
-                                }
-                                .padding(14.dp),
-                            verticalArrangement = Arrangement.spacedBy(3.dp),
-                        ) {
-                            Text(item.name, style = MaterialTheme.typography.titleSmall)
+                    val lower = courseQuery.trim().lowercase()
+                    val filtered = courses.filter { item ->
+                        (item.id.toString() in archivedIds) == showArchived &&
+                            (
+                                lower.isEmpty() ||
+                                    item.name.lowercase().contains(lower) ||
+                                    item.code.lowercase().contains(lower)
+                                )
+                    }
+                    val groups = filtered.groupBy { it.term.ifBlank { "其他" } }
+                    groups.forEach { (term, termCourses) ->
+                        item(key = "term-$term") {
                             Text(
-                                listOf(item.code, item.term).filter { it.isNotBlank() }.joinToString(" · "),
-                                style = MaterialTheme.typography.labelSmall,
+                                term,
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(top = 6.dp),
+                            )
+                        }
+                        items(termCourses, key = { it.id }) { item ->
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(18.dp))
+                                    .background(MaterialTheme.colorScheme.surface)
+                                    .padding(14.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Column(
+                                    Modifier
+                                        .weight(1f)
+                                        .clickable {
+                                            course = item
+                                            section = "files"
+                                        },
+                                    verticalArrangement = Arrangement.spacedBy(3.dp),
+                                ) {
+                                    Text(item.name, style = MaterialTheme.typography.titleSmall)
+                                    Text(
+                                        listOf(item.code, item.term)
+                                            .filter { it.isNotBlank() }
+                                            .joinToString(" · "),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                                TextButton(onClick = { toggleArchive(item.id) }) {
+                                    Text(
+                                        if (item.id.toString() in archivedIds) "取消归档" else "归档",
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    if (filtered.isEmpty() && error == null) {
+                        item {
+                            Text(
+                                if (showArchived) "没有归档课程。" else "没有进行中的课程。",
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
-                    }
-                    if (courses.isEmpty() && error == null) {
-                        item { Text("没有进行中的课程。", color = MaterialTheme.colorScheme.onSurfaceVariant) }
                     }
                 } else {
                     when (section) {

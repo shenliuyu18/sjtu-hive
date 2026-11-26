@@ -23,6 +23,7 @@ import androidx.compose.material.icons.outlined.FolderShared
 import androidx.compose.material.icons.outlined.Inbox
 import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.MenuBook
+import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.PlayCircleOutline
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
@@ -70,6 +71,7 @@ fun OverviewScreen(
     onOpenTodo: () -> Unit = {},
     onOpenSearch: () -> Unit = {},
     onOpenMessages: () -> Unit,
+    onOpenNotifications: () -> Unit = {},
     onOpenMail: (Int) -> Unit,
 ) {
     val today = remember { LocalDate.now() }
@@ -181,6 +183,19 @@ fun OverviewScreen(
                         if (loading) " · 正在刷新…" else "",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Row(
+                Modifier
+                    .clip(RoundedCornerShape(999.dp))
+                    .clickable(onClick = onOpenNotifications)
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                androidx.compose.material3.Icon(
+                    Icons.Outlined.Notifications,
+                    contentDescription = "通知中心",
+                    modifier = Modifier.size(20.dp),
                 )
             }
             Row(

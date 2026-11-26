@@ -1,0 +1,80 @@
+name: macOS
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: 版本号
+        run: echo "VERSION=$(cat VERSION)" >> "$GITHUB_ENV"
+
+      - name: 安装前端依赖
+        working-directory: frontend
+        run: npm ci
+
+      - name: 构建前端
+        working-directory: frontend
+        run: npm run build
+
+      - name: Go 测试
+        run: go test ./... -count=1
+
+      - name: 构建 macOS 应用
+        run: go run github.com/wailsapp/wails/v2/cmd/wails@v2.16.0 build -platform darwin/universal -clean
+
+      - name: 打包 .app 与 .dmg
+        run: |
+          set -euo pipefail
+          APP="build/bin/SJTU Hive.app"
+          test -d "$APP"
+          codesign --force --deep --sign - "$APP"
+          mkdir -p dist
+          ditto -c -k --keepParent "$APP" "dist/SJTU-Hive-${VERSION}-macos-universal.app.zip"
+          STAGE="$(mktemp -d)"
+          cp -R "$APP" "$STAGE/"
+          ln -s /Applications "$STAGE/Applications"
+          hdiutil create -volname "SJTU Hive" -srcfolder "$STAGE" -ov -format UDZO \
+            "dist/SJTU-Hive-${VERSION}-macos-universal.dmg"
+          cd dist
+          shasum -a 256 * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sjtu-hive-macos-${{ env.VERSION }}
+          path: |
+            dist/SJTU-Hive-${{ env.VERSION }}-macos-universal.dmg
+            dist/SJTU-Hive-${{ env.VERSION }}-macos-universal.app.zip
+            dist/SHA256SUMS.txt
+
+      - name: 发布到 Release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${GITHUB_REF_NAME}" \
+            "dist/SJTU-Hive-${VERSION}-macos-universal.dmg" \
+            "dist/SJTU-Hive-${VERSION}-macos-universal.app.zip" \
+            "dist/SHA256SUMS.txt" --clobber

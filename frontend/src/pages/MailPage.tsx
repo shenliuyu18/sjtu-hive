@@ -642,7 +642,7 @@ export function MailPage() {
             <div className="space-y-3 p-5 text-xs leading-relaxed text-ink-2">
               <p>支持交大邮箱（mail.sjtu.edu.cn）与任意第三方 IMAP / SMTP 邮箱，SSL/TLS 固定开启。</p>
               <div className="rounded-lg border border-line bg-surface-2 p-3 text-[0.68rem] text-ink-3">
-                密码使用 Windows DPAPI 加密保存在本机；首次同步会建立本地邮件索引，打开邮件时再按需获取正文与附件。
+                密码使用 系统安全存储 加密保存在本机；首次同步会建立本地邮件索引，打开邮件时再按需获取正文与附件。
               </div>
               <div className="flex items-center gap-2">
                 <Button variant="primary" onClick={() => navigate('settings', { settingsSection: 'accounts' })}>

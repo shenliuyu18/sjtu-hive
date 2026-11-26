@@ -87,7 +87,7 @@ export function Sidebar({ badges }: { badges: Partial<Record<AppView, number>> }
   const info = useSettings((state) => state.info);
 
   const hidden = new Set(settings.navHidden);
-  const servicesTestEnabled = settings.servicesTestEnabled;
+  const servicesTestEnabled = settings.servicesTestEnabled && info?.platform !== 'darwin';
 
   return (
     <aside

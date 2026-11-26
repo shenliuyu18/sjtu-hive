@@ -17,6 +17,17 @@ object HiveThemePrefs {
     private const val KEY_DOCKED = "bottom_bar_docked"
     private const val KEY_BLUR_RADIUS = "bottom_bar_blur_radius"
     private const val KEY_BLUR_ALPHA = "bottom_bar_blur_alpha"
+    private const val KEY_FONT_SCALE = "font_scale"
+
+    /** 全局字号缩放（0.7–1.8），由根组合的 LocalDensity 应用。 */
+    fun fontScale(context: Context): Float =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getFloat(KEY_FONT_SCALE, 1f).coerceIn(0.7f, 1.8f)
+
+    fun setFontScale(context: Context, value: Float) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit().putFloat(KEY_FONT_SCALE, value.coerceIn(0.7f, 1.8f)).apply()
+    }
 
     /** 底栏玻璃模糊半径（dp）。 */
     fun blurRadius(context: Context): Int =

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -778,5 +779,54 @@ func TestCompareVersions(t *testing.T) {
 		if got := compareVersions(item.right, item.left); got != -item.want {
 			t.Fatalf("reverse compareVersions(%q, %q) = %d, want %d", item.right, item.left, got, -item.want)
 		}
+	}
+}
+
+func TestCallWaitsForStartup(t *testing.T) {
+	instance := NewApp()
+	instance.router = NewRouter()
+	instance.router.Handle("ping", func([]json.RawMessage) (any, error) {
+		return "pong", nil
+	})
+
+	done := make(chan string, 1)
+	failure := make(chan error, 1)
+	go func() {
+		value, err := instance.Call("ping", "[]")
+		if err != nil {
+			failure <- err
+			return
+		}
+		done <- value
+	}()
+
+	select {
+	case value := <-done:
+		t.Fatalf("Call returned before startup finished: %s", value)
+	case err := <-failure:
+		t.Fatalf("Call failed before startup finished: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(instance.ready)
+
+	select {
+	case value := <-done:
+		if value != `"pong"` {
+			t.Fatalf("unexpected result: %s", value)
+		}
+	case err := <-failure:
+		t.Fatalf("call: %v", err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("Call did not resume after startup")
+	}
+}
+
+func TestCallReportsStartupError(t *testing.T) {
+	instance := NewApp()
+	instance.startErr = errors.New("boom")
+	close(instance.ready)
+	if _, err := instance.Call("ping", "[]"); err == nil || !strings.Contains(err.Error(), "boom") {
+		t.Fatalf("expected startup error, got %v", err)
 	}
 }

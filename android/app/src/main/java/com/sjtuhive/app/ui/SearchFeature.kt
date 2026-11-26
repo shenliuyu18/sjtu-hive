@@ -56,6 +56,7 @@ fun SearchScreen(
     onOpenEmail: () -> Unit,
     onOpenSchedule: () -> Unit,
     onOpenTodo: () -> Unit,
+    onOpenSettings: () -> Unit = {},
 ) {
     var query by remember { mutableStateOf("") }
     var hits by remember { mutableStateOf<List<SearchHit>>(emptyList()) }
@@ -84,7 +85,7 @@ fun SearchScreen(
             val canvas = CanvasApi(context)
             canvas.coursesCached().filter { it.name.lowercase().contains(lower) || it.code.lowercase().contains(lower) }
                 .forEach { result += SearchHit(it.name, "Canvas 课程 · ${it.term}", "Canvas") }
-            canvas.coursesCached().take(6).forEach { course ->
+            canvas.coursesCached().take(20).forEach { course ->
                 canvas.filesCached(course.id).filter { it.name.lowercase().contains(lower) }.take(8).forEach {
                     result += SearchHit(it.name, "Canvas 文件 · ${course.name}", "Canvas")
                 }
@@ -105,6 +106,23 @@ fun SearchScreen(
                 it.title.lowercase().contains(lower) || it.location.lowercase().contains(lower)
             }.take(10).forEach {
                 result += SearchHit(it.title, "日程 · ${it.startAt.toString().take(16).replace('T', ' ')}", "日程")
+            }
+        }
+        runCatching {
+            listOf(
+                "账户与登录",
+                "主题与外观",
+                "字号与底栏",
+                "测试功能",
+                "备份与恢复",
+                "存储与缓存",
+                "更新与关于",
+                "邮箱账号",
+                "Canvas 连接",
+                "水源社区",
+                "选课社区",
+            ).filter { it.lowercase().contains(lower) }.forEach {
+                result += SearchHit(it, "设置项", "设置")
             }
         }
         hits = result
@@ -181,6 +199,7 @@ fun SearchScreen(
                                     "待办" -> onOpenTodo()
                                     "Canvas" -> onOpenCanvas()
                                     "邮箱" -> onOpenEmail()
+                                    "设置" -> onOpenSettings()
                                     else -> onOpenSchedule()
                                 }
                             },

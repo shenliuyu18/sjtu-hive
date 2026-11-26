@@ -80,6 +80,7 @@ export default function App() {
   const view = useApp((state) => state.view);
   const loaded = useSettings((state) => state.loaded);
   const servicesTestEnabled = useSettings((state) => state.state.servicesTestEnabled);
+  const isMac = useSettings((state) => state.info?.platform === 'darwin');
   const error = useSettings((state) => state.error);
   const unreadNotifications = useNotifications((state) => state.unread);
 
@@ -104,10 +105,10 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (loaded && view === 'services' && !servicesTestEnabled) {
+    if (loaded && view === 'services' && (!servicesTestEnabled || isMac)) {
       useApp.getState().navigate('dashboard');
     }
-  }, [loaded, servicesTestEnabled, view]);
+  }, [loaded, servicesTestEnabled, isMac, view]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {

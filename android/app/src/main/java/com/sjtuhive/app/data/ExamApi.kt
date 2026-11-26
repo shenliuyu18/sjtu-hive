@@ -70,7 +70,7 @@ class ExamApi(private val context: Context) {
         )
         val body = HiveHttp.postForm(context, QUERY_URL, PAGE_URL, ORIGIN, fields)
         val payload = runCatching { JSONObject(body) }.getOrElse {
-            throw CampusAuthException("考试接口没有返回预期数据，请重新登录后再试")
+            throw IllegalStateException("考试接口返回的数据无法识别，请稍后重试")
         }
         val items = payload.optJSONArray("items") ?: return emptyList()
         return (0 until items.length()).mapNotNull { index ->

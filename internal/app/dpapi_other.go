@@ -1,13 +1,19 @@
-//go:build !windows
+//go:build !windows && !darwin
 
 package app
 
-import "errors"
-
-func protectBytes([]byte) ([]byte, error) {
-	return nil, errors.New("当前平台不支持 DPAPI")
+func protectBytes(plain []byte) ([]byte, error) {
+	key, err := fileSecretKey()
+	if err != nil {
+		return nil, err
+	}
+	return sealWithKey(key, plain)
 }
 
-func unprotectBytes([]byte) ([]byte, error) {
-	return nil, errors.New("当前平台不支持 DPAPI")
+func unprotectBytes(sealed []byte) ([]byte, error) {
+	key, err := fileSecretKey()
+	if err != nil {
+		return nil, err
+	}
+	return openWithKey(key, sealed)
 }

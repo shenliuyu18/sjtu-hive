@@ -43,6 +43,7 @@ import { useApp } from '@/stores/app';
 import { Button } from '@/components/ui/Button';
 import { Input, Textarea } from '@/components/ui/Input';
 import { Dialog, DialogContent } from '@/components/ui/Dialog';
+import { ImageLightbox } from '@/components/content/ImageLightbox';
 import { Badge, Card, EmptyState, PageHeader, Spinner } from '@/components/ui/Misc';
 
 type Feed =
@@ -79,29 +80,89 @@ function categoryColor(color: string | null | undefined) {  if (!color) return '
 
 function PostBody({ html }: { html: string }) {
   const navigate = useApp((state) => state.navigate);
-  const clean = useMemo(
-    () =>
-      DOMPurify.sanitize(html, {
-        FORBID_TAGS: ['script', 'iframe', 'object', 'embed', 'form', 'input', 'button', 'textarea', 'select', 'style', 'link', 'meta', 'base'],
-        FORBID_ATTR: ['srcdoc', 'onerror', 'onload', 'onclick', 'onmouseover'],
-        ADD_ATTR: ['target', 'rel', 'class'],
-      }),
-    [html],
-  );
+  const [previewImage, setPreviewImage] = useState<{ src: string; alt: string } | null>(null);
+  const clean = useMemo(() => {
+    const sanitized = DOMPurify.sanitize(html, {
+      FORBID_TAGS: ['script', 'iframe', 'object', 'embed', 'form', 'input', 'button', 'textarea', 'select', 'style', 'link', 'meta', 'base'],
+      FORBID_ATTR: ['srcdoc', 'onerror', 'onload', 'onclick', 'onmouseover'],
+      ADD_ATTR: ['target', 'rel', 'class'],
+    });
+    // 帖子里的图片常是 /uploads/... 相对路径，桌面端页面不在水源域下，必须补成绝对地址。
+    const parsed = new DOMParser().parseFromString(sanitized, 'text/html');
+    const absolute = (value: string) => {
+      try {
+        return new URL(value, origin).toString();
+      } catch {
+        return value;
+      }
+    };
+    parsed.querySelectorAll('img').forEach((image) => {
+      const source = image.getAttribute('src') || image.getAttribute('data-src') || '';
+      if (source) image.setAttribute('src', absolute(source));
+      image.removeAttribute('data-src');
+      const srcset = image.getAttribute('srcset');
+      if (srcset) {
+        image.setAttribute(
+          'srcset',
+          srcset
+            .split(',')
+            .map((part) => {
+              const [url, ...descriptor] = part.trim().split(/\s+/);
+              return url ? [absolute(url), ...descriptor].join(' ') : part.trim();
+            })
+            .join(', '),
+        );
+      }
+      image.setAttribute('loading', 'lazy');
+    });
+    // Discourse 会给图片套一层 lightbox 链接并附带尺寸信息；这里直接拆掉，
+    // 避免点图片/空白区域跳浏览器，预览统一交给应用内灯箱。
+    parsed.querySelectorAll('a.lightbox, a[href]').forEach((anchor) => {
+      const image = anchor.querySelector('img');
+      if (!image) return;
+      const href = anchor.getAttribute('href') ?? '';
+      const imageLink =
+        anchor.classList.contains('lightbox') ||
+        /\.(png|jpe?g|gif|webp|bmp|svg)([?#]|$)/i.test(href);
+      if (!imageLink) return;
+      anchor.replaceWith(image);
+    });
+    parsed
+      .querySelectorAll('.lightbox-wrapper .meta, .lightbox .meta, .lightbox-wrapper .filename, .lightbox-wrapper .informations')
+      .forEach((node) => node.remove());
+    return parsed.body.innerHTML;
+  }, [html]);
   return (
-    <div
-      className="markdown-body shuiyuan-post selectable"
-      onClick={(event) => {
-        const target = event.target as HTMLElement;
-        const anchor = target.closest('a[href]') as HTMLAnchorElement | null;
-        if (!anchor) return;
-        const href = anchor.getAttribute('href');
-        if (!href || href.startsWith('#')) return;
-        event.preventDefault();
-        openIntent(resolveLink(href, origin), navigate, (url) => void call('app.openExternal', url));
-      }}
-      dangerouslySetInnerHTML={{ __html: clean }}
-    />
+    <>
+      <div
+        className="markdown-body shuiyuan-post selectable"
+        onClick={(event) => {
+          const target = event.target as HTMLElement;
+          const image = target.closest('img') as HTMLImageElement | null;
+          const imageSrc = image?.getAttribute('src');
+          if (image && imageSrc) {
+            event.preventDefault();
+            event.stopPropagation();
+            setPreviewImage({ src: imageSrc, alt: image.getAttribute('alt') ?? '' });
+            return;
+          }
+          const anchor = target.closest('a[href]') as HTMLAnchorElement | null;
+          if (!anchor) return;
+          const href = anchor.getAttribute('href');
+          if (!href || href.startsWith('#')) return;
+          event.preventDefault();
+          openIntent(resolveLink(href, origin), navigate, (url) => void call('app.openExternal', url));
+        }}
+        dangerouslySetInnerHTML={{ __html: clean }}
+      />
+      {previewImage ? (
+        <ImageLightbox
+          src={previewImage.src}
+          alt={previewImage.alt}
+          onClose={() => setPreviewImage(null)}
+        />
+      ) : null}
+    </>
   );
 }
 
@@ -140,6 +201,7 @@ export function ShuiyuanPage() {
   const [notifications, setNotifications] = useState<ShuiyuanNotificationItem[]>([]);
   const [counts, setCounts] = useState<ShuiyuanCounts>({ notifications: 0, messages: 0 });
   const [uploading, setUploading] = useState(false);
+  const [pendingReplyImage, setPendingReplyImage] = useState<{ path: string; name: string; dataUrl: string } | null>(null);
   const [profileUsername, setProfileUsername] = useState<string | null>(null);
   const [profile, setProfile] = useState<ShuiyuanProfile | null>(null);
   const [profileLoading, setProfileLoading] = useState(false);
@@ -413,17 +475,32 @@ export function ShuiyuanPage() {
     });
   };
 
-  const uploadReplyImage = async () => {
+  const chooseReplyImage = async () => {
     if (!detail || uploading) return;
     try {
       const path = await call<string | null>('app.chooseFiles', '选择要上传的图片');
       if (!path) return;
-      setUploading(true);
-      const upload = await call<ShuiyuanUpload>('shuiyuan.uploadPath', path);
+      const preview = await call<{ name: string; dataUrl: string }>('shuiyuan.imagePreview', path);
+      if (!preview?.dataUrl) return;
+      setPendingReplyImage({ path, name: preview.name, dataUrl: preview.dataUrl });
+    } catch (cause) {
+      toast.error(cause instanceof Error ? cause.message : '图片预览失败');
+    }
+  };
+
+  const confirmReplyImage = async () => {
+    if (!detail || !pendingReplyImage || uploading) return;
+    const target = pendingReplyImage;
+    setUploading(true);
+    try {
+      const upload = await call<ShuiyuanUpload>('shuiyuan.uploadPath', target.path);
       if (upload?.shortUrl) {
-        const name = path.split(/[\\/]/).pop() ?? 'image';
+        const name = target.name || 'image';
         setReplyText((current) => `${current}${current ? '\n' : ''}![${name}](${upload.shortUrl})`);
         toast.success('图片已上传');
+        setPendingReplyImage(null);
+      } else {
+        toast.error('水源没有返回图片地址');
       }
     } catch (cause) {
       toast.error(cause instanceof Error ? cause.message : '图片上传失败');
@@ -556,7 +633,7 @@ export function ShuiyuanPage() {
                 </div>
               ) : null}
               <p className="text-[0.66rem] text-ink-3">
-                密钥使用 Windows DPAPI 加密保存，仅在本机使用；可以随时在设置中断开。
+                密钥使用 系统安全存储 加密保存，仅在本机使用；可以随时在设置中断开。
               </p>
             </div>
           </Card>
@@ -952,9 +1029,9 @@ export function ShuiyuanPage() {
                   className="h-24"
                 />
                 <div className="mt-2 flex items-center justify-between">
-                  <Button size="sm" variant="secondary" onClick={() => void uploadReplyImage()} disabled={uploading}>
+                  <Button size="sm" variant="secondary" onClick={() => void chooseReplyImage()} disabled={uploading}>
                     {uploading ? <Loader2 className="size-3.5 animate-spin" /> : <Upload className="size-3.5" />}
-                    上传图片
+                    插入图片
                   </Button>
                   <Button variant="primary" onClick={() => void sendReply()} disabled={sendingReply || !replyText.trim()}>
                     {sendingReply ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
@@ -1231,6 +1308,40 @@ export function ShuiyuanPage() {
               />
             </div>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={Boolean(pendingReplyImage)}
+        onOpenChange={(open) => {
+          if (!open && !uploading) setPendingReplyImage(null);
+        }}
+      >
+        <DialogContent
+          title="发送前预览"
+          description={pendingReplyImage?.name}
+          wide
+          footer={
+            <>
+              <Button variant="ghost" onClick={() => setPendingReplyImage(null)} disabled={uploading}>
+                取消
+              </Button>
+              <Button variant="primary" onClick={() => void confirmReplyImage()} disabled={uploading}>
+                {uploading ? <Loader2 className="size-4 animate-spin" /> : null}
+                插入并上传
+              </Button>
+            </>
+          }
+        >
+          {pendingReplyImage ? (
+            <div className="flex items-center justify-center rounded-lg bg-surface-3 p-2">
+              <img
+                src={pendingReplyImage.dataUrl}
+                alt={pendingReplyImage.name}
+                className="max-h-[55vh] max-w-full rounded-md object-contain"
+              />
+            </div>
+          ) : null}
         </DialogContent>
       </Dialog>
 

@@ -3,6 +3,7 @@ package app
 import (
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 )
 
 const (
@@ -25,43 +26,37 @@ type Paths struct {
 	EdgeProfile  string
 }
 
+type platformPathSet struct {
+	Data, Cache, Logs, WebView, Backups, Downloads string
+}
+
 func LoadPaths() (Paths, error) {
-	appData := os.Getenv("APPDATA")
-	if appData == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return Paths{}, err
-		}
-		appData = filepath.Join(home, "AppData", "Roaming")
-	}
-	localAppData := os.Getenv("LOCALAPPDATA")
-	if localAppData == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return Paths{}, err
-		}
-		localAppData = filepath.Join(home, "AppData", "Local")
-	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return Paths{}, err
 	}
-
-	legacyRoaming := filepath.Join(appData, LegacyAppName)
-	legacyLocal := filepath.Join(localAppData, LegacyAppName)
-	paths := Paths{
-		DataDir:      filepath.Join(appData, AppName),
-		CacheDir:     filepath.Join(localAppData, AppName, "cache"),
-		LogDir:       filepath.Join(appData, AppName, "logs"),
-		WebViewDir:   filepath.Join(localAppData, AppName, "EBWebView"),
-		DownloadsDir: filepath.Join(home, "Downloads"),
-		SecretsDir:   filepath.Join(appData, AppName, "secrets"),
-		BackupDir:    filepath.Join(localAppData, AppName, "backups"),
-		CanvasDir:    filepath.Join(localAppData, AppName, "cache", "canvas"),
-		MailDir:      filepath.Join(localAppData, AppName, "cache", "mail"),
-		EdgeProfile:  filepath.Join(localAppData, AppName, "edge-campus"),
+	dirs, err := platformPaths(home)
+	if err != nil {
+		return Paths{}, err
 	}
-	_ = migrateLegacyData(paths.DataDir, filepath.Join(localAppData, AppName), legacyRoaming, legacyLocal)
+	paths := Paths{
+		DataDir:      dirs.Data,
+		CacheDir:     dirs.Cache,
+		LogDir:       dirs.Logs,
+		WebViewDir:   dirs.WebView,
+		DownloadsDir: dirs.Downloads,
+		SecretsDir:   filepath.Join(dirs.Data, "secrets"),
+		BackupDir:    dirs.Backups,
+		CanvasDir:    filepath.Join(dirs.Cache, "canvas"),
+		MailDir:      filepath.Join(dirs.Cache, "mail"),
+		EdgeProfile:  filepath.Join(dirs.Cache, "browser-login"),
+	}
+	if goruntime.GOOS == "windows" {
+		appData := os.Getenv("APPDATA")
+		localAppData := os.Getenv("LOCALAPPDATA")
+		_ = migrateLegacyData(paths.DataDir, filepath.Dir(paths.CacheDir),
+			filepath.Join(appData, LegacyAppName), filepath.Join(localAppData, LegacyAppName))
+	}
 	for _, dir := range []string{
 		paths.DataDir,
 		paths.CacheDir,

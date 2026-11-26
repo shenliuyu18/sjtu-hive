@@ -27,6 +27,7 @@ export function CommandPalette() {
   const setOpen = useApp((state) => state.setCommandOpen);
   const navigate = useApp((state) => state.navigate);
   const servicesTestEnabled = useSettings((state) => state.state.servicesTestEnabled);
+  const isMac = useSettings((state) => state.info?.platform === 'darwin');
   const [query, setQuery] = useState('');
   const [groups, setGroups] = useState<SearchGroup[]>([]);
   const [active, setActive] = useState(0);
@@ -79,7 +80,7 @@ export function CommandPalette() {
 
   const commands = useMemo<CommandItem[]>(() => {
     const nav = allNavItems
-      .filter((item) => item.id !== 'services' || servicesTestEnabled)
+      .filter((item) => item.id !== 'services' || (servicesTestEnabled && !isMac))
       .map((item) => ({
       id: `nav:${item.id}`,
       label: item.label,
@@ -92,7 +93,7 @@ export function CommandPalette() {
     return text
       ? nav.filter((item) => item.label.toLowerCase().includes(text))
       : nav;
-  }, [query, servicesTestEnabled]);
+  }, [query, servicesTestEnabled, isMac]);
 
   const items = useMemo<CommandItem[]>(() => {
     const searchItems: CommandItem[] = [];

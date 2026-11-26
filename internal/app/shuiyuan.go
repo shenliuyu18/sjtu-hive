@@ -1271,6 +1271,38 @@ func (s *Shuiyuan) UploadPath(path string) (ShuiyuanUpload, error) {
 	return s.Upload(filepath.Base(path), base64.StdEncoding.EncodeToString(data))
 }
 
+type ShuiyuanImagePreview struct {
+	Name    string `json:"name"`
+	DataURL string `json:"dataUrl"`
+}
+
+// ImagePreview 给发图前的确认弹窗用：本地图片转成 data URL，不落临时文件。
+func (s *Shuiyuan) ImagePreview(path string) (ShuiyuanImagePreview, error) {
+	ext := strings.ToLower(filepath.Ext(path))
+	mime := map[string]string{
+		".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+		".gif": "image/gif", ".webp": "image/webp", ".bmp": "image/bmp",
+	}[ext]
+	if mime == "" {
+		return ShuiyuanImagePreview{}, errors.New("仅支持预览 PNG / JPG / GIF / WebP / BMP 图片")
+	}
+	info, err := os.Stat(path)
+	if err != nil || info.IsDir() {
+		return ShuiyuanImagePreview{}, errors.New("文件不存在")
+	}
+	if info.Size() > 20<<20 {
+		return ShuiyuanImagePreview{}, errors.New("图片超过 20 MB")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ShuiyuanImagePreview{}, err
+	}
+	return ShuiyuanImagePreview{
+		Name:    filepath.Base(path),
+		DataURL: "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(data),
+	}, nil
+}
+
 func (s *Shuiyuan) Register(router *Router) {
 	router.Handle("shuiyuan.state", func([]json.RawMessage) (any, error) {
 		return s.State(), nil
@@ -1421,6 +1453,13 @@ func (s *Shuiyuan) Register(router *Router) {
 			return nil, err
 		}
 		return s.UploadPath(path)
+	})
+	router.Handle("shuiyuan.imagePreview", func(args []json.RawMessage) (any, error) {
+		path, err := DecodeArg[string](args, 0)
+		if err != nil {
+			return nil, err
+		}
+		return s.ImagePreview(path)
 	})
 	router.Handle("shuiyuan.upload", func(args []json.RawMessage) (any, error) {
 		fileName, err := DecodeArg[string](args, 0)

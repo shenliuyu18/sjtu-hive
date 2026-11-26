@@ -143,6 +143,7 @@ export function Settings() {
   const setSetting = useSettings((state) => state.set);
   const setMany = useSettings((state) => state.setMany);
   const navigate = useApp((state) => state.navigate);
+  const isMac = info?.platform === 'darwin';
   const params = useApp((state) => state.params);
   const setOnboardingOpen = useApp((state) => state.setOnboardingOpen);
   const [section, setSection] = useState<SectionId>(
@@ -690,7 +691,7 @@ export function Settings() {
                 </Section>
                 <div className="rounded-card border border-line bg-surface-2 p-4 text-[0.68rem] leading-relaxed text-ink-3">
                   <ShieldCheck className="mb-1.5 size-4 text-success" />
-                  jAccount Cookie、邮箱密码与选课社区登录凭据均使用 Windows DPAPI 加密保存在本机，不会上传到任何服务器。
+                  jAccount Cookie、邮箱密码与选课社区登录凭据均使用 系统安全存储 加密保存在本机，不会上传到任何服务器。
                 </div>
               </>
             ) : null}
@@ -793,7 +794,7 @@ export function Settings() {
                 <Section title="启动与同步">
                   <Row
                     label="开机自动启动"
-                    description="登录 Windows 后自动打开 SJTU。"
+                    description={isMac ? '登录 macOS 后自动打开 SJTU。' : '登录 Windows 后自动打开 SJTU。'}
                     control={
                       <Switch
                         checked={settings.openAtLogin}
@@ -801,19 +802,21 @@ export function Settings() {
                       />
                     }
                   />
-                  <Row
-                    label="点击关闭按钮时"
-                    description="最小化到系统托盘后可从托盘恢复，右键托盘图标可退出。"
-                    control={
-                      <Select
-                        value={settings.closeAction}
-                        onChange={(event) => update('closeAction', event.target.value)}
-                      >
-                        <option value="tray">最小化到托盘</option>
-                        <option value="quit">直接退出应用</option>
-                      </Select>
-                    }
-                  />
+                  {isMac ? null : (
+                    <Row
+                      label="点击关闭按钮时"
+                      description="最小化到系统托盘后可从托盘恢复，右键托盘图标可退出。"
+                      control={
+                        <Select
+                          value={settings.closeAction}
+                          onChange={(event) => update('closeAction', event.target.value)}
+                        >
+                          <option value="tray">最小化到托盘</option>
+                          <option value="quit">直接退出应用</option>
+                        </Select>
+                      }
+                    />
+                  )}
                   <Row
                     label="邮件自动同步"
                     description="应用运行时按间隔检查新邮件。"
@@ -871,14 +874,14 @@ export function Settings() {
                   />
                   <Row
                     label="系统通知"
-                    description="通过任务栏托盘图标投递 Windows 通知。"
+                    description={isMac ? '通过 macOS 通知中心投递系统通知。' : '通过任务栏托盘图标投递 Windows 通知。'}
                     last
                     control={
                       <Button
                         size="sm"
                         onClick={() =>
                           void call('app.testNotification')
-                            .then(() => toast.success('已发送系统通知，请查看屏幕右下角'))
+                            .then(() => toast.success('已发送系统通知，请查看系统通知中心'))
                             .catch((error) =>
                               toast.error(error instanceof Error ? error.message : '发送失败'),
                             )
@@ -889,19 +892,21 @@ export function Settings() {
                     }
                   />
                 </Section>
-                <Section title="测试功能" description="仍在测试的功能，默认关闭；可以随时开关。">
-                  <Row
-                    label="办事大厅（测试功能）"
-                    description="在侧栏显示交我办办事入口；关闭后立即隐藏。"
-                    last
-                    control={
-                      <Switch
-                        checked={settings.servicesTestEnabled}
-                        onCheckedChange={(value) => update('servicesTestEnabled', value)}
-                      />
-                    }
-                  />
-                </Section>
+                {isMac ? null : (
+                  <Section title="测试功能" description="仍在测试的功能，默认关闭；可以随时开关。">
+                    <Row
+                      label="办事大厅（测试功能）"
+                      description="在侧栏显示交我办办事入口；关闭后立即隐藏。"
+                      last
+                      control={
+                        <Switch
+                          checked={settings.servicesTestEnabled}
+                          onCheckedChange={(value) => update('servicesTestEnabled', value)}
+                        />
+                      }
+                    />
+                  </Section>
+                )}
                 <Section title="导航入口" description="隐藏不常用的侧栏入口，能力不会关闭。">
                   <div className="grid grid-cols-2 gap-3 p-4">
                     {navOptions.map((item) => (
@@ -1263,7 +1268,7 @@ export function Settings() {
       <Dialog open={courseOpen} onOpenChange={setCourseOpen}>
         <DialogContent
           title="登录选课社区"
-          description="选课社区使用自己的账号，与校园 jAccount 无关；凭据使用 Windows DPAPI 加密保存在本机。"
+          description="选课社区使用自己的账号，与校园 jAccount 无关；凭据使用 系统安全存储 加密保存在本机。"
           footer={
             <>
               <Button variant="ghost" onClick={() => setCourseOpen(false)}>
@@ -1385,7 +1390,7 @@ export function Settings() {
             </div>
           ) : null}
           <p className="mt-4 text-[0.68rem] leading-relaxed text-ink-3">
-            密码使用 Windows DPAPI 加密保存在本机。首次同步会建立本地邮件索引，之后打开邮件时再按需获取正文与附件。
+            密码使用 系统安全存储 加密保存在本机。首次同步会建立本地邮件索引，之后打开邮件时再按需获取正文与附件。
           </p>
         </DialogContent>
       </Dialog>
@@ -1494,7 +1499,7 @@ export function Settings() {
                 <section>
                   <h3 className="mb-1 font-semibold text-ink">加密与备份</h3>
                   <p>
-                    上述凭据使用 Windows DPAPI 加密，只能由当前 Windows 用户解密。普通导出备份不含登录凭据；加密备份（*.hivebackup）使用 scrypt 派生密钥并以 AES-256-GCM 加密，口令不会被保存。WebDAV 备份上传到你自行配置的服务器，应用不保留副本。
+                    上述凭据使用 系统安全存储 加密，只能由当前系统用户解密。普通导出备份不含登录凭据；加密备份（*.hivebackup）使用 scrypt 派生密钥并以 AES-256-GCM 加密，口令不会被保存。WebDAV 备份上传到你自行配置的服务器，应用不保留副本。
                   </p>
                 </section>
                 <section>
@@ -1621,7 +1626,7 @@ export function Settings() {
               <p>这个版本没有提供更新说明。</p>
             )}
             {updateInfo && !updateInfo.asset ? (
-              <p className="text-warning">该版本没有 Windows 安装包，请到发布页手动下载。</p>
+              <p className="text-warning">该版本没有对应平台的安装包，请到发布页手动下载。</p>
             ) : null}
             {updateProgress && updateBusy === 'download' ? (
               <div className="h-1 overflow-hidden rounded-full bg-line">

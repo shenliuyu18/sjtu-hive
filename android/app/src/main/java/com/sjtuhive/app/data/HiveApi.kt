@@ -223,7 +223,21 @@ object HiveHttp {
             .header("User-Agent", USER_AGENT)
         if (origin != null) builder.header("Origin", origin)
         headers.forEach { (name, value) -> builder.header(name, value) }
-        if (requestBody == null) builder.get() else builder.method(method, requestBody)
+        if (requestBody == null) {
+            if (method.equals("GET", ignoreCase = true)) {
+                builder.get()
+            } else if (
+                method.equals("POST", ignoreCase = true) ||
+                method.equals("PUT", ignoreCase = true) ||
+                method.equals("PATCH", ignoreCase = true)
+            ) {
+                builder.method(method, ByteArray(0).toRequestBody(null))
+            } else {
+                builder.method(method, null)
+            }
+        } else {
+            builder.method(method, requestBody)
+        }
         client(context).newCall(builder.build()).execute().use { response ->
             HttpResult(
                 code = response.code,

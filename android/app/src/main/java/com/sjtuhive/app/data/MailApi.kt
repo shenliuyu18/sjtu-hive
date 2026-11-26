@@ -19,6 +19,12 @@ import javax.mail.Multipart
 import javax.mail.Part
 import javax.mail.Session
 import javax.mail.internet.InternetAddress
+import javax.mail.search.BodyTerm
+import javax.mail.search.FromStringTerm
+import javax.mail.search.HeaderTerm
+import javax.mail.search.OrTerm
+import javax.mail.search.SearchTerm
+import javax.mail.search.SubjectTerm
 
 data class MailAccount(
     val address: String,
@@ -175,6 +181,178 @@ class MailApi(private val context: Context) {
                 target
             }
         }
+
+    suspend fun bodyHtml(folderName: String, index: Int): String = withContext(Dispatchers.IO) {
+        val account = account() ?: throw CampusAuthException("请先配置邮箱账号")
+        withFolder(account, folderName) { folder ->
+            val message = folder.getMessage(index) ?: return@withFolder ""
+            extractHtml(message)
+        }
+    }
+
+    private fun extractHtml(part: Part): String {
+        if (part.isMimeType("text/html")) {
+            return part.content?.toString().orEmpty()
+        }
+        if (part.isMimeType("multipart/*")) {
+            val multipart = runCatching { part.content as? Multipart }.getOrNull() ?: return ""
+            for (index in 0 until multipart.count) {
+                val html = extractHtml(multipart.getBodyPart(index))
+                if (html.isNotBlank()) return html
+            }
+        }
+        return ""
+    }
+
+    /** 标记已读/未读：直接回写 IMAP 的 \\Seen 标志。 */
+    suspend fun markSeen(folderName: String, index: Int, seen: Boolean) =
+        withContext(Dispatchers.IO) {
+            val account = account() ?: throw CampusAuthException("请先配置邮箱账号")
+            withWritableFolder(account, folderName) { folder ->
+                val message = folder.getMessage(index) ?: return@withWritableFolder
+                message.setFlag(javax.mail.Flags.Flag.SEEN, seen)
+            }
+        }
+
+    /** 服务端搜索当前文件夹（主题/发件人/正文）。 */
+    suspend fun search(
+        folderName: String,
+        query: String,
+        limit: Int = 30,
+    ): List<MailSummary> = withContext(Dispatchers.IO) {
+        val keyword = query.trim()
+        if (keyword.isEmpty()) return@withContext emptyList()
+        val account = account() ?: throw CampusAuthException("请先配置邮箱账号")
+        withFolder(account, folderName) { folder ->
+            val term: SearchTerm = OrTerm(
+                arrayOf(
+                    SubjectTerm(keyword),
+                    FromStringTerm(keyword),
+                    BodyTerm(keyword),
+                ),
+            )
+            val found = folder.search(term)
+            found.sortedByDescending { it.receivedDate ?: it.sentDate }
+                .take(limit)
+                .map { message ->
+                    val from = (message.from?.firstOrNull() as? InternetAddress)?.let {
+                        it.personal?.takeIf { name -> name.isNotBlank() } ?: it.address
+                    }.orEmpty()
+                    MailSummary(
+                        index = message.messageNumber,
+                        subject = message.subject.orEmpty().ifBlank { "（无主题）" },
+                        from = from,
+                        date = formatDate(message.sentDate ?: message.receivedDate),
+                        seen = message.flags?.contains(javax.mail.Flags.Flag.SEEN) == true,
+                    )
+                }
+        }
+    }
+
+    suspend fun deleteForever(folderName: String, index: Int) = withContext(Dispatchers.IO) {
+        val account = account() ?: throw CampusAuthException("请先配置邮箱账号")
+        withStore<Unit>(account) { store ->
+            val folder = store.getFolder(folderName)
+            folder.open(Folder.READ_WRITE)
+            try {
+                folder.getMessage(index)?.setFlag(javax.mail.Flags.Flag.DELETED, true)
+            } finally {
+                runCatching { folder.close(true) }
+            }
+        }
+    }
+
+    suspend fun emptyTrash() = withContext(Dispatchers.IO) {
+        val account = account() ?: throw CampusAuthException("请先配置邮箱账号")
+        withStore<Unit>(account) { store ->
+            val folder = store.getFolder("Trash")
+            if (!folder.exists()) return@withStore
+            folder.open(Folder.READ_WRITE)
+            try {
+                for (number in 1..folder.messageCount) {
+                    folder.getMessage(number)?.setFlag(javax.mail.Flags.Flag.DELETED, true)
+                }
+            } finally {
+                runCatching { folder.close(true) }
+            }
+        }
+    }
+
+    private fun draftFolder(store: javax.mail.Store): Folder {
+        val direct = store.getFolder("Drafts")
+        if (direct.exists()) return direct
+        return runCatching {
+            store.defaultFolder.list("*").firstOrNull { it.name.contains("Draft", true) }
+        }.getOrNull() ?: direct
+    }
+
+    private fun draftId(key: String) = "<$key@sjtu-hive>"
+
+    /** 把草稿 APPEND 到服务端草稿箱；同 key 的旧草稿先删除，避免重复。 */
+    suspend fun saveServerDraft(key: String, to: String, subject: String, body: String) =
+        withContext(Dispatchers.IO) {
+            val account = account() ?: throw CampusAuthException("请先配置邮箱账号")
+            if (key.isBlank()) return@withContext
+            withStore<Unit>(account) { store ->
+                val folder = draftFolder(store)
+                if (!folder.exists()) folder.create(Folder.HOLDS_MESSAGES)
+                folder.open(Folder.READ_WRITE)
+                try {
+                    val messageId = draftId(key)
+                    folder.search(HeaderTerm("Message-ID", messageId)).forEach {
+                        it.setFlag(javax.mail.Flags.Flag.DELETED, true)
+                    }
+                    val properties = Properties().apply { put("mail.store.protocol", "imaps") }
+                    val session = Session.getInstance(properties)
+                    val message = javax.mail.internet.MimeMessage(session).apply {
+                        setFrom(InternetAddress(account.address))
+                        if (to.isNotBlank()) {
+                            setRecipients(
+                                javax.mail.Message.RecipientType.TO,
+                                InternetAddress.parse(to),
+                            )
+                        }
+                        setSubject(subject.ifBlank { "（无主题）" })
+                        setText(body)
+                        setHeader("Message-ID", messageId)
+                    }
+                    folder.appendMessages(arrayOf<javax.mail.Message>(message))
+                } finally {
+                    runCatching { folder.close(true) }
+                }
+            }
+        }
+
+    suspend fun deleteServerDraft(key: String) = withContext(Dispatchers.IO) {
+        if (key.isBlank()) return@withContext
+        val account = account() ?: return@withContext
+        withStore<Unit>(account) { store ->
+            val folder = draftFolder(store)
+            if (!folder.exists()) return@withStore
+            folder.open(Folder.READ_WRITE)
+            try {
+                folder.search(HeaderTerm("Message-ID", draftId(key))).forEach {
+                    it.setFlag(javax.mail.Flags.Flag.DELETED, true)
+                }
+            } finally {
+                runCatching { folder.close(true) }
+            }
+        }
+    }
+
+    private fun <T> withWritableFolder(
+        account: MailAccount,
+        folderName: String,
+        block: (Folder) -> T,
+    ): T = withStore(account) { store ->
+        val folder = store.getFolder(folderName)
+        folder.open(Folder.READ_WRITE)
+        try {
+            block(folder)
+        } finally {
+            runCatching { folder.close(false) }
+        }
+    }
 
     private fun writeAttachment(part: Part, name: String, target: java.io.File): Boolean {
         if (runCatching { part.fileName }.getOrNull() == name) {

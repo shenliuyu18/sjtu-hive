@@ -452,7 +452,7 @@ export function ClassroomPage() {
                 </div>
               ) : filteredCourses.length === 0 ? (
                 <div className="px-3 py-8 text-center text-[0.66rem] text-ink-3">
-                  本学期没有课堂录像，或登录已失效。
+                  本学期暂无可回看的课堂录像。
                 </div>
               ) : (
                 filteredCourses.map((course) => (
