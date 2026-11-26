@@ -68,7 +68,7 @@
 ## 数据与安全
 
 - 所有数据保存在本机；没有应用账号系统、遥测或云端中转。
-- Windows 凭据（邮箱密码、校园 Cookie、水源 Key、选课社区会话）使用 **Windows DPAPI** 加密；macOS 使用 **钥匙串（Keychain）** 主密钥 + AES-256-GCM；Android 校园会话保存在应用私有存储，邮箱密码等使用 AndroidKeyStore AES/GCM。
+- Windows 凭据（邮箱密码、校园 Cookie、水源 Key、选课社区会话）使用 **Windows DPAPI** 加密；macOS 使用仅当前用户可读（0600）的本地主密钥 + AES-256-GCM；Android 校园会话保存在应用私有存储，邮箱密码等使用 AndroidKeyStore AES/GCM。
 - Windows 数据：SQLite `%APPDATA%\SJTU Hive\sjtu.db`，凭据 `%APPDATA%\SJTU Hive\secrets\`，日志 `%APPDATA%\SJTU Hive\logs\`，缓存 `%LOCALAPPDATA%\SJTU Hive\cache\`。
 - macOS 数据：`~/Library/Application Support/SJTU Hive`（数据库/凭据）、`~/Library/Caches/SJTU Hive`（缓存/浏览器登录）、`~/Library/Logs/SJTU Hive`（日志）；下载目录为 `~/Downloads`。
 - 默认项目目录：`文档\SJTU Notes`（首次启动创建；移除登记不会删除磁盘文件）。
