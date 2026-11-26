@@ -49,15 +49,21 @@ func hiveTrayQuit() {
 	}
 }
 
+type trayReadyInfo struct {
+	ok      bool
+	visible bool
+	width   int
+}
+
 var (
 	darwinTrayReadyOnce sync.Once
-	darwinTrayReadyCh   = make(chan bool, 1)
+	darwinTrayReadyCh   = make(chan trayReadyInfo, 1)
 )
 
 //export hiveTrayReady
-func hiveTrayReady(ok C.int) {
+func hiveTrayReady(ok C.int, visible C.int, width C.int) {
 	darwinTrayReadyOnce.Do(func() {
-		darwinTrayReadyCh <- ok != 0
+		darwinTrayReadyCh <- trayReadyInfo{ok: ok != 0, visible: visible != 0, width: int(width)}
 	})
 }
 
@@ -73,15 +79,15 @@ func NewTray(exePath, tooltip string, logger *slog.Logger, onOpen, onQuit func()
 		return nil, errors.New("无法创建 macOS 菜单栏图标")
 	}
 	select {
-	case ok := <-darwinTrayReadyCh:
-		if !ok {
+	case info := <-darwinTrayReadyCh:
+		if !info.ok {
 			return nil, errors.New("无法创建 macOS 菜单栏图标")
+		}
+		if logger != nil {
+			logger.Info("menu bar tray ready", "visible", info.visible, "width", info.width)
 		}
 	case <-time.After(3 * time.Second):
 		return nil, errors.New("创建 macOS 菜单栏图标超时")
-	}
-	if logger != nil {
-		logger.Info("menu bar tray ready")
 	}
 	return &Tray{}, nil
 }

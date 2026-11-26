@@ -3,7 +3,7 @@
 
 extern void hiveTrayOpen(void);
 extern void hiveTrayQuit(void);
-extern void hiveTrayReady(int ok);
+extern void hiveTrayReady(int ok, int visible, int width);
 
 @interface HiveTrayTarget : NSObject
 - (void)onOpen:(id)sender;
@@ -58,7 +58,7 @@ int hive_tray_start(const char *tooltip) {
 		} else {
 			ok = 1;
 		}
-		hiveTrayReady(ok);
+		hiveTrayReady(ok, (hiveItem != nil && hiveItem.isVisible) ? 1 : 0, hiveItem != nil ? (int)hiveItem.button.frame.size.width : 0);
 	});
 	return 1;
 }
