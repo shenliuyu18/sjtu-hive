@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.3.3-beta.3 — 2026-11-26
+
+### 新增（macOS）
+
+- 首个 macOS 桌面版（Universal，Apple Silicon / Intel）：本地数据目录、回收站、开机启动（LaunchAgent）、系统通知与自动更新按平台适配。
+- 菜单栏图标：打开主窗口 / 退出；关闭窗口按设置收起到菜单栏。
+- jAccount 与传承交大登录复用 Edge / Chrome / Chromium 独立配置，Cookie 读取后仅存本机。
+- 凭据使用 0600 本地主密钥 + AES-256-GCM 加密，首次启动不再弹钥匙串密码框。
+- GitHub Actions `macos-15` 构建 Universal `.app`、ad-hoc 签名并产出 `.dmg` / `.app.zip`，支持启动冒烟与 Release 上传。
+
+### 改进（两端）
+
+- 水源社区：帖子图片支持应用内灯箱（缩放/拖动/保存），发图前可预览；移除图片外层链接与尺寸元信息。
+- 全页面 Playwright E2E：覆盖侧栏所有页面、设置分区、折叠与水源灯箱，CI 自动截图。
+- 终端 shell 选择改为平台实现：macOS 使用 `$SHELL` / zsh / bash。
+
+### 修复
+
+- 空列表误报「未登录 / 未同步 / 登录过期」。
+- Android 预览双指缩放跳变、Markdown/HTML 无法缩放、PDF 仅渲染前 60 页。
+- Windows 上 macOS 托盘 C 源文件导致的 CI 编译失败。
+
 ## 1.3.3-beta.2 — 2026-11-17
 
 ### 修复
