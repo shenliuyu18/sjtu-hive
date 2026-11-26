@@ -30,9 +30,10 @@ int hive_tray_start(const char *tooltip) {
 		int ok = 0;
 		if (hiveItem == nil) {
 			hiveTarget = [HiveTrayTarget new];
-			hiveItem = [[NSStatusBar systemStatusBar] statusItemWithLength:NSVariableStatusItemLength];
+			hiveItem = [[NSStatusBar systemStatusBar] statusItemWithLength:80.0];
 			if (hiveItem != nil) {
 				hiveItem.button.title = @"SJTU";
+				hiveItem.button.font = [NSFont systemFontOfSize:12];
 				NSImage *icon = [[NSApplication sharedApplication] applicationIconImage];
 				if (icon != nil) {
 					icon.size = NSMakeSize(18, 18);

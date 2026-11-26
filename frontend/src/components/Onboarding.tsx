@@ -108,7 +108,7 @@ export function Onboarding() {
             </div>
             <div className="grid gap-2 sm:grid-cols-3">
               {[
-                { icon: ShieldCheck, title: '凭据只留本机', text: 'DPAPI 加密，不上传服务器' },
+                { icon: ShieldCheck, title: '凭据只留本机', text: '系统安全存储加密，不上传服务器' },
                 { icon: CheckCircle2, title: '不替代你操作', text: '只读资料与通知，不自动交作业' },
                 { icon: Wifi, title: '真实校园服务', text: '请求直达学校官方接口' },
               ].map((item) => {
