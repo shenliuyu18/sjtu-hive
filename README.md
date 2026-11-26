@@ -98,6 +98,10 @@ go run github.com/wailsapp/wails/v2/cmd/wails@v2.16.0 build -platform darwin/uni
 
 前端可单独预览：`cd frontend && npm install && npm run dev`；浏览器模式下由 `src/lib/mock.ts` 提供演示数据。
 
+自动化验证：
+- `cd frontend && npm run e2e`：Playwright 遍历全部侧栏页面、设置分区、侧栏折叠与水源图片灯箱，并收集控制台错误；CI 在 `ubuntu-latest` 跑这套用例。
+- `macos.yml` 会在真实 macOS runner 上启动 `.app`，检查进程、菜单栏初始化日志与截图；`--upload-release` 手动触发时直接把 `.dmg/.zip` 传到对应 Release。
+
 ### Android 构建
 
 ```sh
