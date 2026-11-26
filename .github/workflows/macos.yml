@@ -7,6 +7,11 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      upload_release:
+        description: 'Upload artifacts to the existing release'
+        type: boolean
+        default: false
 
 jobs:
   build:
@@ -27,24 +32,24 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
-      - name: 版本号
+      - name: Read version
         run: echo "VERSION=$(cat VERSION)" >> "$GITHUB_ENV"
 
-      - name: 安装前端依赖
+      - name: Install frontend deps
         working-directory: frontend
         run: npm ci
 
-      - name: 构建前端
+      - name: Build frontend
         working-directory: frontend
         run: npm run build
 
-      - name: Go 测试
+      - name: Go tests
         run: go test ./... -count=1
 
-      - name: 构建 macOS 应用
+      - name: Build macOS app
         run: go run github.com/wailsapp/wails/v2/cmd/wails@v2.16.0 build -platform darwin/universal -clean
 
-      - name: 打包 .app 与 .dmg
+      - name: Package app and dmg
         run: |
           set -euo pipefail
           APP="build/bin/SJTU Hive.app"
@@ -55,14 +60,12 @@ jobs:
           STAGE="$(mktemp -d)"
           cp -R "$APP" "$STAGE/"
           ln -s /Applications "$STAGE/Applications"
-          hdiutil create -volname "SJTU Hive" -srcfolder "$STAGE" -ov -format UDZO \
-            "dist/SJTU-Hive-${VERSION}-macos-universal.dmg"
+          hdiutil create -volname "SJTU Hive" -srcfolder "$STAGE" -ov -format UDZO             "dist/SJTU-Hive-${VERSION}-macos-universal.dmg"
           cd dist
           shasum -a 256 * > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
-
-      - name: 启动冒烟验证
+      - name: Launch smoke test
         run: |
           set -euo pipefail
           APP="build/bin/SJTU Hive.app"
@@ -90,12 +93,9 @@ jobs:
             dist/SJTU-Hive-${{ env.VERSION }}-macos-universal.app.zip
             dist/SHA256SUMS.txt
 
-      - name: 发布到 Release
-        if: startsWith(github.ref, 'refs/tags/')
+      - name: Upload to release
+        if: startsWith(github.ref, 'refs/tags/') || inputs.upload_release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release upload "${GITHUB_REF_NAME}" \
-            "dist/SJTU-Hive-${VERSION}-macos-universal.dmg" \
-            "dist/SJTU-Hive-${VERSION}-macos-universal.app.zip" \
-            "dist/SHA256SUMS.txt" --clobber
+          gh release upload "v${VERSION}"             "dist/SJTU-Hive-${VERSION}-macos-universal.dmg"             "dist/SJTU-Hive-${VERSION}-macos-universal.app.zip" --clobber
