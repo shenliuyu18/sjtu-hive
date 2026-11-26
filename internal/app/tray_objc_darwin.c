@@ -30,15 +30,14 @@ int hive_tray_start(const char *tooltip) {
 		int ok = 0;
 		if (hiveItem == nil) {
 			hiveTarget = [HiveTrayTarget new];
-			hiveItem = [[NSStatusBar systemStatusBar] statusItemWithLength:NSSquareStatusItemLength];
+			hiveItem = [[NSStatusBar systemStatusBar] statusItemWithLength:NSVariableStatusItemLength];
 			if (hiveItem != nil) {
-				NSImage *icon = [NSImage imageWithSystemSymbolName:@"graduationcap"
-					accessibilityDescription:@"SJTU Hive"];
+				hiveItem.button.title = @"SJTU";
+				NSImage *icon = [[NSApplication sharedApplication] applicationIconImage];
 				if (icon != nil) {
-					icon.template = YES;
+					icon.size = NSMakeSize(18, 18);
 					hiveItem.button.image = icon;
-				} else {
-					hiveItem.button.title = @"SJTU";
+					hiveItem.button.imagePosition = NSImageLeft;
 				}
 				hiveItem.button.toolTip = text;
 
