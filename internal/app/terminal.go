@@ -43,7 +43,6 @@ type ShellInfo struct {
 
 var errNoShell = errors.New("没有找到可用的 Shell")
 
-
 func (m *TerminalManager) Start(projectID string, cols, rows int) (map[string]any, error) {
 	if m.projectPath == nil {
 		return nil, errors.New("终端尚未初始化")
